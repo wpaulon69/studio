@@ -452,7 +452,7 @@ function calculateFinalTotals(schedule: Schedule, employees: Employee[]) {
 }
 
 
-function validateSchedule(schedule: Schedule, employees: Employee[], holidays: Holiday[]): ValidationResult[] {
+function validateSchedule(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[]): ValidationResult[] {
   const results: ValidationResult[] = [];
   const employeeMap = new Map(employees.map(e => [e.id, e]));
 
@@ -1127,7 +1127,7 @@ export function generateSchedule(
   //     console.error("Failed to find a valid schedule solution.");
        // Return the partially filled schedule and an error report
        // calculateFinalTotals(schedule, employeesForGeneration); // Calculate whatever was assigned
-       // const report = validateSchedule(schedule, employeesForGeneration, holidays);
+       // const report = validateSchedule(schedule, employeesForGeneration, absences, holidays);
        // report.push({rule: "Generator Error", passed: false, details:"Could not find a complete valid assignment."});
        // return { schedule, report };
   // }
@@ -1139,7 +1139,7 @@ export function generateSchedule(
 
   // 4. Validate Final Schedule against all rules
   console.log("Validating final schedule...");
-  const report = validateSchedule(schedule, employeesForGeneration, holidays);
+  const report = validateSchedule(schedule, employeesForGeneration, absences, holidays); // Pass absences here
   const endTime = performance.now();
   console.log(`Schedule generation completed in ${(endTime - startTime).toFixed(2)} ms`);
 

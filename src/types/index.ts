@@ -1,8 +1,9 @@
+
 export interface Employee {
   id: number;
   name: string;
   eligibleWeekend: boolean; // Can this person have a full D/D weekend?
-  preferences: {
+  preferences: { // Made non-optional for easier handling, ensure default empty object is provided
     preferWeekendWork?: boolean;
     preferMondayRest?: boolean;
     preferThursdayT?: boolean;
@@ -17,8 +18,11 @@ export interface Employee {
 }
 
 export type ShiftType = "M" | "T" | "D" | "C" | "F" | "LM" | "LAO";
+export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "C", "F", "LM", "LAO"];
+
 
 export interface Absence {
+  id?: number; // Optional ID for client-side management
   employeeId: number;
   type: "LAO" | "LM";
   startDate: string; // YYYY-MM-DD
@@ -26,6 +30,7 @@ export interface Absence {
 }
 
 export interface Holiday {
+  id?: number; // Optional ID for client-side management
   date: string; // YYYY-MM-DD
   description: string;
 }
@@ -86,10 +91,11 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800", // #d4edda
   T: "bg-blue-100 text-blue-800", // #cce5ff
   D: "bg-gray-200 text-gray-700", // #e9ecef
-  C: "bg-gray-200 text-gray-700", // #e9ecef
-  F: "bg-gray-200 text-gray-700", // #e9ecef
+  C: "bg-orange-100 text-orange-800", // Assign a different color for C if needed
+  F: "bg-purple-100 text-purple-800", // Assign a different color for F if needed
   LM: "bg-red-100 text-red-800", // #f8d7da
-  LAO: "bg-red-100 text-red-800", // #f8d7da
+  LAO: "bg-pink-100 text-pink-800", // Assign a different color for LAO if needed
 };
 
 export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd
+

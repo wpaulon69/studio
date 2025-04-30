@@ -1,42 +1,42 @@
+
 "use client";
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea"; // Import Textarea
 import { generateSchedule } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType } from '@/types';
-import { SHIFT_COLORS, TOTALS_COLOR } from '@/types';
+import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR } from '@/types';
 import { cn } from "@/lib/utils";
-import { format, parseISO, getDay } from 'date-fns';
-import { CheckCircle, XCircle, AlertTriangle, Info } from 'lucide-react';
+import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save } from 'lucide-react';
+import { useForm, Controller, useFieldArray } from "react-hook-form";
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
 
-// --- Initial Data (Based on Prompt) ---
-const initialEmployees: Employee[] = [
-  { id: 1, name: 'Rios', eligibleWeekend: true, preferences: {}, history: {"2025-04-27": "D", "2025-04-28": "D", "2025-04-29": "M", "2025-04-30": "M", "2025-04-31": "T"} },
-  { id: 2, name: 'Molina', eligibleWeekend: true, preferences: { fixedAssignments: [{date: '2025-05-01', shift: 'M'}, {date: '2025-05-19', shift: 'T'}, {date: '2025-05-25', shift: 'M'}], fixedDaysOff: ['2025-05-17', '2025-05-18'] }, history: {"2025-04-27": "D", "2025-04-28": "D", "2025-04-29": "C", "2025-04-30": "M", "2025-04-31": "M"} },
-  { id: 3, name: 'Montu', eligibleWeekend: true, preferences: {}, history: {"2025-04-27": "LAO", "2025-04-28": "LAO", "2025-04-29": "LAO", "2025-04-30": "LAO", "2025-04-31": "M"} },
-  { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: { fixedAssignments: [{date: '2025-05-24', shift: 'M'}, {date: '2025-05-25', shift: 'M'}] }, history: {"2025-04-27": "M", "2025-04-28": "M", "2025-04-29": "M", "2025-04-30": "D", "2025-04-31": "D"} },
-  { id: 5, name: 'Garavaglia', eligibleWeekend: true, preferences: {}, history: {"2025-04-27": "M", "2025-04-28": "M", "2025-04-29": "T", "2025-04-30": "T", "2025-04-31": "LAO"} },
-  { id: 6, name: 'Forni', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {"2025-04-27": "T", "2025-04-28": "T", "2025-04-29": "D", "2025-04-30": "M", "2025-04-31": "M"} },
-  { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {"2025-04-27": "LM", "2025-04-28": "LM", "2025-04-29": "LM", "2025-04-30": "LM", "2025-04-31": "LM"} }
+// --- Initial Data (Now defaults, user can modify) ---
+const defaultEmployees: Employee[] = [
+    { id: 1, name: 'Rios', eligibleWeekend: true, preferences: {}, history: {} },
+    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: { fixedAssignments: [{ date: '2025-05-01', shift: 'M' }, { date: '2025-05-19', shift: 'T' }, { date: '2025-05-25', shift: 'M' }], fixedDaysOff: ['2025-05-17', '2025-05-18'] }, history: {} },
+    { id: 3, name: 'Montu', eligibleWeekend: true, preferences: {}, history: {} },
+    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: { fixedAssignments: [{ date: '2025-05-24', shift: 'M' }, { date: '2025-05-25', shift: 'M' }] }, history: {} },
+    { id: 5, name: 'Garavaglia', eligibleWeekend: true, preferences: {}, history: {} },
+    { id: 6, name: 'Forni', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {} },
+    { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {} }
 ];
 
-const absences: Absence[] = [
-  { employeeId: 5, type: 'LAO', startDate: '2025-05-01', endDate: '2025-05-18' },
-  { employeeId: 7, type: 'LM', startDate: '2025-05-01', endDate: '2025-05-25' },
-];
+const defaultAbsences: Absence[] = []; // Start empty
+const defaultHolidays: Holiday[] = []; // Start empty
 
-const holidays: Holiday[] = [
-  { date: '2025-05-01', description: 'Día del Trabajador' },
-  { date: '2025-05-02', description: 'Puente Turístico' }, // Assuming 2nd is bridge holiday based on context
-  { date: '2025-05-25', description: 'Día de la Revolución de Mayo' },
-];
-
-const CURRENT_YEAR = 2025;
+const CURRENT_YEAR = new Date().getFullYear();
 const MONTHS = [
     { value: 1, label: 'Enero' }, { value: 2, label: 'Febrero' }, { value: 3, label: 'Marzo' },
     { value: 4, label: 'Abril' }, { value: 5, label: 'Mayo' }, { value: 6, label: 'Junio' },
@@ -44,50 +44,280 @@ const MONTHS = [
     { value: 10, label: 'Octubre' }, { value: 11, label: 'Noviembre' }, { value: 12, label: 'Diciembre' }
 ];
 
+const shiftTypeSchema = z.enum(SHIFT_TYPES);
 
+const fixedAssignmentSchema = z.object({
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha debe ser YYYY-MM-DD"),
+    shift: shiftTypeSchema
+});
+
+const employeePreferenceSchema = z.object({
+    preferWeekendWork: z.boolean().optional(),
+    preferMondayRest: z.boolean().optional(),
+    preferThursdayT: z.boolean().optional(),
+    fixedAssignments: z.array(fixedAssignmentSchema).optional(),
+    fixedDaysOff: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD")).optional(),
+    fixedWorkShift: z.object({
+        dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
+        shift: shiftTypeSchema
+    }).optional()
+});
+
+const employeeSchema = z.object({
+    id: z.number().optional(), // Optional for new employees
+    name: z.string().min(1, "Nombre es requerido"),
+    eligibleWeekend: z.boolean(),
+    preferences: employeePreferenceSchema.optional(),
+    // History is handled separately for now
+});
+
+const absenceSchema = z.object({
+    id: z.number().optional(), // For potential editing/deleting later
+    employeeId: z.number({required_error: "Debe seleccionar un empleado"}).min(1, "Debe seleccionar un empleado"),
+    type: z.enum(["LAO", "LM"]),
+    startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
+    endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
+}).refine(data => data.endDate >= data.startDate, {
+    message: "La fecha final debe ser igual o posterior a la fecha inicial",
+    path: ["endDate"],
+});
+
+const holidaySchema = z.object({
+    id: z.number().optional(),
+    date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
+    description: z.string().min(1, "Descripción es requerida"),
+});
+
+// --- Component ---
 export default function Home() {
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<number>(5); // Default to May
-  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR); // Default to 2025
+  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // Default to current month
+  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR); // Default to current year
 
+  const [employees, setEmployees] = useState<Employee[]>(defaultEmployees);
+  const [absences, setAbsences] = useState<Absence[]>(defaultAbsences);
+  const [holidays, setHolidays] = useState<Holiday[]>(defaultHolidays);
+  const [historyInputs, setHistoryInputs] = useState<{ [employeeId: number]: { [date: string]: ShiftType | null } }>({});
+
+  const [isEmployeeDialogOpen, setIsEmployeeDialogOpen] = useState(false);
+  const [isAbsenceDialogOpen, setIsAbsenceDialogOpen] = useState(false);
+  const [isHolidayDialogOpen, setIsHolidayDialogOpen] = useState(false);
+  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
+  const [editingAbsence, setEditingAbsence] = useState<Absence | null>(null);
+  const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
+
+
+  // --- Form Hooks ---
+    const employeeForm = useForm<z.infer<typeof employeeSchema>>({
+        resolver: zodResolver(employeeSchema),
+        defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], fixedWorkShift: undefined } },
+    });
+    const { fields: fixedAssignmentsFields, append: appendFixedAssignment, remove: removeFixedAssignment } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedAssignments" });
+    const { fields: fixedDaysOffFields, append: appendFixedDayOff, remove: removeFixedDayOff } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedDaysOff" });
+
+
+    const absenceForm = useForm<z.infer<typeof absenceSchema>>({
+        resolver: zodResolver(absenceSchema),
+        defaultValues: { employeeId: undefined, type: 'LAO', startDate: '', endDate: '' },
+    });
+     const holidayForm = useForm<z.infer<typeof holidaySchema>>({
+        resolver: zodResolver(holidaySchema),
+        defaultValues: { date: '', description: '' },
+    });
+
+  // --- Data Management Functions ---
+
+  const handleAddEmployee = (data: z.infer<typeof employeeSchema>) => {
+    setEmployees(prev => [...prev, { ...data, id: Date.now(), history: {} }]); // Simple ID generation
+    setIsEmployeeDialogOpen(false);
+    employeeForm.reset();
+  };
+
+  const handleUpdateEmployee = (data: z.infer<typeof employeeSchema>) => {
+    if (!editingEmployee) return;
+    setEmployees(prev => prev.map(emp => emp.id === editingEmployee.id ? { ...emp, ...data, preferences: data.preferences || {} } : emp));
+    setIsEmployeeDialogOpen(false);
+    setEditingEmployee(null);
+    employeeForm.reset();
+  }
+
+  const handleDeleteEmployee = (id: number) => {
+    setEmployees(prev => prev.filter(emp => emp.id !== id));
+    // Also remove related absences and history input
+    setAbsences(prev => prev.filter(a => a.employeeId !== id));
+    setHistoryInputs(prev => {
+        const newHist = {...prev};
+        delete newHist[id];
+        return newHist;
+    })
+  }
+
+  const openEditEmployeeDialog = (employee: Employee) => {
+      setEditingEmployee(employee);
+      // Make sure optional fields are initialized as arrays if they exist
+      const prefs = employee.preferences || {};
+      employeeForm.reset({
+          name: employee.name,
+          eligibleWeekend: employee.eligibleWeekend,
+          preferences: {
+              preferWeekendWork: prefs.preferWeekendWork ?? false,
+              preferMondayRest: prefs.preferMondayRest ?? false,
+              preferThursdayT: prefs.preferThursdayT ?? false,
+              fixedAssignments: prefs.fixedAssignments ?? [],
+              fixedDaysOff: prefs.fixedDaysOff ?? [],
+              fixedWorkShift: prefs.fixedWorkShift // Keep as potentially undefined
+          }
+      });
+      setIsEmployeeDialogOpen(true);
+  };
+
+
+  const handleAddAbsence = (data: z.infer<typeof absenceSchema>) => {
+    setAbsences(prev => [...prev, { ...data, id: Date.now() }]);
+    setIsAbsenceDialogOpen(false);
+    absenceForm.reset();
+  };
+
+   const openEditAbsenceDialog = (absence: Absence) => {
+      setEditingAbsence(absence);
+      absenceForm.reset({
+          employeeId: absence.employeeId,
+          type: absence.type,
+          startDate: absence.startDate,
+          endDate: absence.endDate
+      });
+      setIsAbsenceDialogOpen(true);
+  };
+
+   const handleUpdateAbsence = (data: z.infer<typeof absenceSchema>) => {
+     if (!editingAbsence?.id) return;
+     setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? { ...a, ...data } : a));
+     setIsAbsenceDialogOpen(false);
+     setEditingAbsence(null);
+     absenceForm.reset();
+   }
+
+  const handleDeleteAbsence = (id: number) => {
+      setAbsences(prev => prev.filter(a => a.id !== id));
+  };
+
+  const handleAddHoliday = (data: z.infer<typeof holidaySchema>) => {
+    setHolidays(prev => [...prev, { ...data, id: Date.now() }]);
+    setIsHolidayDialogOpen(false);
+    holidayForm.reset();
+  };
+
+    const openEditHolidayDialog = (holiday: Holiday) => {
+        setEditingHoliday(holiday);
+        holidayForm.reset({
+            date: holiday.date,
+            description: holiday.description
+        });
+        setIsHolidayDialogOpen(true);
+    };
+
+    const handleUpdateHoliday = (data: z.infer<typeof holidaySchema>) => {
+        if (!editingHoliday?.id) return;
+        setHolidays(prev => prev.map(h => h.id === editingHoliday.id ? { ...h, ...data } : h));
+        setIsHolidayDialogOpen(false);
+        setEditingHoliday(null);
+        holidayForm.reset();
+    }
+
+  const handleDeleteHoliday = (id: number) => {
+      setHolidays(prev => prev.filter(h => h.id !== id));
+  };
+
+
+  // --- History Input Handling ---
+  const getPreviousMonthDates = useCallback(() => {
+    const firstDayCurrentMonth = new Date(selectedYear, selectedMonth - 1, 1);
+    const lastDayPreviousMonth = subDays(firstDayCurrentMonth, 1);
+    const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4); // Get last 5 days
+
+    const dates: string[] = [];
+    for (let i = 0; i < 5; i++) {
+        dates.push(format(addDays(firstDayPreviousMonthRelevant, i), 'yyyy-MM-dd'));
+    }
+    return dates.sort().reverse(); // Most recent first
+  }, [selectedYear, selectedMonth]);
+
+  const handleHistoryChange = (employeeId: number, date: string, shift: ShiftType | null) => {
+      setHistoryInputs(prev => ({
+          ...prev,
+          [employeeId]: {
+              ...prev[employeeId],
+              [date]: shift
+          }
+      }));
+  };
+
+  // --- Schedule Generation ---
   const handleGenerateSchedule = () => {
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
 
+     // Prepare employee data with history
+    const employeesWithHistory = employees.map(emp => ({
+      ...emp,
+      history: historyInputs[emp.id] || {},
+      // Reset consecutive days before generation
+      consecutiveWorkDays: 0
+    }));
+
+
+    // Basic validation before calling generator
+     if (employeesWithHistory.length === 0) {
+       setReport([{ rule: "Input Error", passed: false, details: "No hay empleados definidos." }]);
+       setIsLoading(false);
+       return;
+     }
+     if (isNaN(selectedYear) || isNaN(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
+         setReport([{ rule: "Input Error", passed: false, details: "Mes o año inválido." }]);
+         setIsLoading(false);
+         return;
+     }
+
+
     // Simulate async generation for visual feedback
     setTimeout(() => {
       try {
-         // NOTE: Pass a deep copy of initialEmployees to prevent mutation issues if regeneration occurs
-        const result = generateSchedule(selectedYear, selectedMonth, JSON.parse(JSON.stringify(initialEmployees)), absences, holidays);
+         // Pass deep copies to prevent mutation issues
+        const result = generateSchedule(
+          selectedYear,
+          selectedMonth,
+          JSON.parse(JSON.stringify(employeesWithHistory)),
+          JSON.parse(JSON.stringify(absences)),
+          JSON.parse(JSON.stringify(holidays))
+        );
         setSchedule(result.schedule);
         setReport(result.report);
       } catch (error) {
         console.error("Error generating schedule:", error);
-        // Handle error state appropriately, maybe show an error message
-         setReport([{rule: "Generation Error", passed: false, details: "An unexpected error occurred during schedule generation."}]);
+        setReport([{rule: "Generation Error", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Unknown error'}`}]);
       } finally {
         setIsLoading(false);
       }
     }, 50); // Short delay
   };
 
-   // Automatically generate schedule for May 2025 on initial load
-   useEffect(() => {
-    handleGenerateSchedule();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-   }, []); // Empty dependency array ensures this runs only once on mount
-
 
   const getDayHeaders = useMemo(() => {
     if (!schedule) return [];
     return schedule.days.map(day => {
-      const date = parseISO(day.date);
-      const dayOfMonth = format(date, 'd');
-      const dayOfWeek = format(date, 'eee'); // Short day name (Mon, Tue, etc.)
-      return { dayOfMonth, dayOfWeek, isWeekend: day.isWeekend, isHoliday: day.isHoliday };
+      try {
+        const date = parseISO(day.date);
+        if (!isValid(date)) throw new Error('Invalid date');
+        const dayOfMonth = format(date, 'd');
+        const dayOfWeek = format(date, 'eee'); // Short day name (Mon, Tue, etc.)
+        return { dayOfMonth, dayOfWeek, isWeekend: day.isWeekend, isHoliday: day.isHoliday };
+      } catch (e) {
+        console.error(`Error parsing date: ${day.date}`, e);
+        return { dayOfMonth: 'Err', dayOfWeek: 'Err', isWeekend: false, isHoliday: false };
+      }
     });
   }, [schedule]);
 
@@ -105,48 +335,401 @@ export default function Home() {
        return <XCircle className="text-red-600 h-5 w-5" />;
    };
 
+    // Days of week for fixedWorkShift preference
+    const daysOfWeekOptions = [
+        { value: 1, label: 'Lunes' }, { value: 2, label: 'Martes' }, { value: 3, label: 'Miércoles' },
+        { value: 4, label: 'Jueves' }, { value: 5, label: 'Viernes' }, { value: 6, label: 'Sábado' },
+        { value: 0, label: 'Domingo' }
+    ];
+
   return (
     <div className="container mx-auto p-4 md:p-8">
       <Card className="mb-8 shadow-md">
         <CardHeader>
           <CardTitle className="text-2xl font-bold text-primary">ShiftSage - Generador de Horarios</CardTitle>
-          <CardDescription>Generador de horarios para el servicio de mucamas.</CardDescription>
+          <CardDescription>Generador de horarios para personal.</CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col md:flex-row gap-4 items-center">
-           <div className="flex gap-4 w-full md:w-auto">
-               <div className="flex-1">
-                   <Label htmlFor="month-select">Mes</Label>
-                   <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
-                       <SelectTrigger id="month-select">
-                           <SelectValue placeholder="Seleccionar mes" />
-                       </SelectTrigger>
-                       <SelectContent>
-                           {MONTHS.map(m => (
-                               <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+        <CardContent className="space-y-6">
+          {/* Month/Year Selection and Generate Button */}
+          <div className="flex flex-col md:flex-row gap-4 items-end">
+               <div className="flex gap-4 w-full md:w-auto">
+                   <div className="flex-1">
+                       <Label htmlFor="month-select">Mes</Label>
+                       <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+                           <SelectTrigger id="month-select">
+                               <SelectValue placeholder="Seleccionar mes" />
+                           </SelectTrigger>
+                           <SelectContent>
+                               {MONTHS.map(m => (
+                                   <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                               ))}
+                           </SelectContent>
+                       </Select>
+                   </div>
+                   <div className="flex-1">
+                       <Label htmlFor="year-select">Año</Label>
+                       <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                         <SelectTrigger id="year-select">
+                           <SelectValue placeholder="Select year" />
+                         </SelectTrigger>
+                         <SelectContent>
+                           {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
+                             <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
                            ))}
-                       </SelectContent>
-                   </Select>
+                         </SelectContent>
+                       </Select>
+                   </div>
                </div>
-               <div className="flex-1">
-                   <Label htmlFor="year-select">Año</Label>
-                   {/* Basic year input for now, could be a Select too */}
-                   <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
-                     <SelectTrigger id="year-select">
-                       <SelectValue placeholder="Select year" />
-                     </SelectTrigger>
-                     <SelectContent>
-                       {[CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1].map(y => (
-                         <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                       ))}
-                     </SelectContent>
-                   </Select>
-               </div>
-           </div>
-          <Button onClick={handleGenerateSchedule} disabled={isLoading} className="w-full md:w-auto mt-4 md:mt-0">
-            {isLoading ? 'Generando...' : 'Generar Horario'}
-          </Button>
-           {/* Optional: Add button for Excel export here */}
-           {/* <Button variant="outline" disabled={!schedule || isLoading}>Exportar Excel</Button> */}
+              <Button onClick={handleGenerateSchedule} disabled={isLoading} className="w-full md:w-auto">
+                {isLoading ? 'Generando...' : 'Generar Horario'}
+              </Button>
+          </div>
+
+            {/* Configuration Sections */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {/* Employees Section */}
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                        <CardTitle className="text-lg font-medium">Empleados</CardTitle>
+                        <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset(); }}>
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                </Button>
+                            </DialogTrigger>
+                            <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+                                <DialogHeader>
+                                    <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
+                                </DialogHeader>
+                                <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
+                                     {/* Basic Info */}
+                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label htmlFor="name">Nombre</Label>
+                                            <Input id="name" {...employeeForm.register("name")} />
+                                            {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
+                                        </div>
+                                        <div className="flex items-center pt-6 space-x-2">
+                                           <Controller
+                                                name="eligibleWeekend"
+                                                control={employeeForm.control}
+                                                render={({ field }) => (
+                                                    <Checkbox
+                                                        id="eligibleWeekend"
+                                                        checked={field.value}
+                                                        onCheckedChange={field.onChange}
+                                                    />
+                                                )}
+                                            />
+                                            <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
+                                        </div>
+                                    </div>
+
+                                     {/* Preferences */}
+                                    <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                         <div className="flex items-center space-x-2">
+                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
+                                        </div>
+                                         <div className="flex items-center space-x-2">
+                                            <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Label htmlFor="prefMonRest">Prefiere Lunes Franco</Label>
+                                        </div>
+                                         <div className="flex items-center space-x-2">
+                                            <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Label htmlFor="prefThuT">Prefiere Jueves Turno T</Label>
+                                        </div>
+                                    </div>
+
+                                    {/* Fixed Assignments */}
+                                    <div className="space-y-2">
+                                        <Label>Asignaciones Fijas</Label>
+                                        {fixedAssignmentsFields.map((field, index) => (
+                                            <div key={field.id} className="flex gap-2 items-center">
+                                                <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                 <Controller
+                                                    name={`preferences.fixedAssignments.${index}.shift`}
+                                                    control={employeeForm.control}
+                                                    render={({ field }) => (
+                                                         <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                            <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                            <SelectContent>
+                                                                {SHIFT_TYPES.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )}
+                                                />
+                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                            </div>
+                                        ))}
+                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
+                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
+
+                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
+                                    </div>
+
+                                     {/* Fixed Days Off */}
+                                    <div className="space-y-2">
+                                        <Label>Francos Fijos (YYYY-MM-DD)</Label>
+                                        {fixedDaysOffFields.map((field, index) => (
+                                            <div key={field.id} className="flex gap-2 items-center">
+                                                 <Input type="date" {...employeeForm.register(`preferences.fixedDaysOff.${index}`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                 {/* Display potential error for this specific field */}
+                                                 {employeeForm.formState.errors.preferences?.fixedDaysOff?.[index] && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedDaysOff[index]?.message}</p>}
+                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedDayOff(index)}><Trash2 className="h-4 w-4"/></Button>
+                                            </div>
+                                        ))}
+                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedDayOff('')}>+ Franco</Button>
+                                    </div>
+
+
+                                    {/* Fixed Work Shift */}
+                                    <div className="space-y-2 border-t pt-4">
+                                        <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
+                                         <Controller
+                                            name="preferences.fixedWorkShift"
+                                            control={employeeForm.control}
+                                            render={({ field }) => (
+                                            <div className="space-y-2">
+                                                <Label className="text-xs">Días de la Semana</Label>
+                                                 <div className="grid grid-cols-3 gap-2">
+                                                    {daysOfWeekOptions.map(day => (
+                                                        <div key={day.value} className="flex items-center space-x-2">
+                                                            <Checkbox
+                                                                id={`fixedDay-${day.value}`}
+                                                                checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
+                                                                onCheckedChange={(checked) => {
+                                                                    const currentDays = field.value?.dayOfWeek ?? [];
+                                                                    const newDays = checked
+                                                                        ? [...currentDays, day.value]
+                                                                        : currentDays.filter(d => d !== day.value);
+                                                                    field.onChange({ ...field.value, dayOfWeek: newDays });
+                                                                }}
+                                                            />
+                                                            <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                                 <Label className="text-xs">Turno Fijo</Label>
+                                                <Select
+                                                    value={field.value?.shift}
+                                                    onValueChange={(shift) => field.onChange({ ...field.value, shift: shift as ShiftType })}
+                                                >
+                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {SHIFT_TYPES.filter(s => s === 'M' || s === 'T').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                                 <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                            </div>
+                                            )}
+                                        />
+                                    </div>
+
+
+                                    <DialogFooter>
+                                        <DialogClose asChild>
+                                            <Button type="button" variant="outline">Cancelar</Button>
+                                        </DialogClose>
+                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="space-y-2">
+                            {employees.map(emp => (
+                                <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                    {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
+                                    <div className="flex gap-1">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </li>
+                            ))}
+                            {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos.</p>}
+                        </ul>
+                         {/* History Input Section */}
+                        <div className="mt-4 space-y-4 border-t pt-4">
+                            <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
+                            {employees.map(emp => (
+                                <div key={`hist-${emp.id}`} className="space-y-1">
+                                    <p className="text-sm font-medium">{emp.name}</p>
+                                    <div className="grid grid-cols-3 gap-2">
+                                        {getPreviousMonthDates().map(dateStr => (
+                                            <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
+                                                 <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
+                                                 <Select
+                                                    value={historyInputs[emp.id]?.[dateStr] || ''}
+                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value as ShiftType | null)}
+                                                >
+                                                    <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
+                                                        <SelectValue placeholder="-" />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="">- (Vacío)</SelectItem>
+                                                        {SHIFT_TYPES.map(st => (
+                                                            <SelectItem key={st} value={st}>{st}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </CardContent>
+                </Card>
+
+                {/* Absences Section */}
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                        <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
+                         <Dialog open={isAbsenceDialogOpen} onOpenChange={setIsAbsenceDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); }}>
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                </Button>
+                            </DialogTrigger>
+                           <DialogContent className="sm:max-w-[425px]">
+                                <DialogHeader>
+                                    <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
+                                </DialogHeader>
+                                <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
+                                     <div>
+                                        <Label htmlFor="employeeId">Empleado</Label>
+                                        <Controller
+                                            name="employeeId"
+                                            control={absenceForm.control}
+                                            render={({ field }) => (
+                                                <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>
+                                            )}
+                                        />
+                                        {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="type">Tipo</Label>
+                                        <Controller
+                                            name="type"
+                                            control={absenceForm.control}
+                                            render={({ field }) => (
+                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="LAO">LAO</SelectItem>
+                                                        <SelectItem value="LM">LM</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            )} />
+                                         {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
+                                    </div>
+                                     <div>
+                                        <Label htmlFor="startDate">Fecha Inicio</Label>
+                                        <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
+                                         {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
+                                    </div>
+                                     <div>
+                                        <Label htmlFor="endDate">Fecha Fin</Label>
+                                        <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
+                                         {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
+                                    </div>
+                                    <DialogFooter>
+                                         <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="space-y-2">
+                           {absences.map(abs => {
+                                const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
+                                return (
+                                    <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                        <span>{empName}: {abs.type} ({format(parseISO(abs.startDate), 'dd/MM')} - {format(parseISO(abs.endDate), 'dd/MM')})</span>
+                                        <div className="flex gap-1">
+                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
+                                                <Edit className="h-4 w-4" />
+                                            </Button>
+                                             <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
+                                        </div>
+                                    </li>
+                                );
+                           })}
+                            {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
+                        </ul>
+                    </CardContent>
+                </Card>
+
+                {/* Holidays Section */}
+                 <Card>
+                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                        <CardTitle className="text-lg font-medium">Feriados</CardTitle>
+                         <Dialog open={isHolidayDialogOpen} onOpenChange={setIsHolidayDialogOpen}>
+                            <DialogTrigger asChild>
+                                <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); }}>
+                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                </Button>
+                            </DialogTrigger>
+                             <DialogContent className="sm:max-w-[425px]">
+                                <DialogHeader>
+                                    <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
+                                </DialogHeader>
+                                <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
+                                    <div>
+                                        <Label htmlFor="holidayDate">Fecha</Label>
+                                        <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
+                                        {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
+                                    </div>
+                                    <div>
+                                        <Label htmlFor="holidayDescription">Descripción</Label>
+                                        <Input id="holidayDescription" {...holidayForm.register("description")} />
+                                         {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
+                                    </div>
+                                    <DialogFooter>
+                                         <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
+                                    </DialogFooter>
+                                </form>
+                            </DialogContent>
+                        </Dialog>
+                    </CardHeader>
+                    <CardContent>
+                        <ul className="space-y-2">
+                            {holidays.map(hol => (
+                                <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                     <span>{format(parseISO(hol.date), 'dd/MM/yyyy')}: {hol.description}</span>
+                                     <div className="flex gap-1">
+                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
+                                            <Edit className="h-4 w-4" />
+                                        </Button>
+                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
+                                            <Trash2 className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </li>
+                            ))}
+                             {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
+                        </ul>
+                    </CardContent>
+                </Card>
+            </div>
+
         </CardContent>
       </Card>
 
@@ -190,7 +773,7 @@ export default function Home() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {initialEmployees.map(emp => (
+                {employees.map(emp => (
                   <TableRow key={emp.id}>
                     <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap">{emp.name}</TableCell>
                     {schedule.days.map(day => {
@@ -269,9 +852,9 @@ export default function Home() {
           <CardContent>
             <div className="space-y-3">
               {report.map((item, index) => (
-                 <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") ? "border-amber-300" : "border-red-200") )}>
+                 <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? "border-yellow-300" : "border-red-200") )}>
                     <div className="flex items-start space-x-3">
-                       {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") ? <Info className="text-amber-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
+                       {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
                        <div>
                            <AlertTitle className="font-semibold">{item.rule}</AlertTitle>
                            {item.details && <AlertDescription className="text-sm">{item.details}</AlertDescription>}
@@ -287,3 +870,6 @@ export default function Home() {
     </div>
   );
 }
+
+
+    

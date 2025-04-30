@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea"; // Import Textarea
+import { Textarea } from "@/components/ui/textarea";
 import { generateSchedule } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR } from '@/types';
@@ -244,7 +244,8 @@ export default function Home() {
     return dates.sort().reverse(); // Most recent first
   }, [selectedYear, selectedMonth]);
 
-  const handleHistoryChange = (employeeId: number, date: string, shift: ShiftType | null) => {
+  const handleHistoryChange = (employeeId: number, date: string, value: string) => {
+      const shift = value === '-' ? null : value as ShiftType; // Treat placeholder value '-' as null
       setHistoryInputs(prev => ({
           ...prev,
           [employeeId]: {
@@ -566,14 +567,14 @@ export default function Home() {
                                             <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
                                                  <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
                                                  <Select
-                                                    value={historyInputs[emp.id]?.[dateStr] || ''}
-                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value as ShiftType | null)}
+                                                    value={historyInputs[emp.id]?.[dateStr] || '-'} // Use '-' as placeholder value
+                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
                                                 >
                                                     <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
                                                         <SelectValue placeholder="-" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="">- (Vacío)</SelectItem>
+                                                        <SelectItem value="-">- (Vacío)</SelectItem>
                                                         {SHIFT_TYPES.map(st => (
                                                             <SelectItem key={st} value={st}>{st}</SelectItem>
                                                         ))}
@@ -870,6 +871,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-    

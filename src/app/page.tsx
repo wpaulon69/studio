@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { generateSchedule } from '@/lib/schedule-generator';
+import { generateSchedule, calculateFinalTotals, validateSchedule } from '@/lib/schedule-generator'; // Import calculation and validation separately
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR } from '@/types';
 import { cn } from "@/lib/utils";
@@ -44,11 +44,12 @@ const MONTHS = [
     { value: 10, label: 'Octubre' }, { value: 11, label: 'Noviembre' }, { value: 12, label: 'Diciembre' }
 ];
 
-const shiftTypeSchema = z.enum(SHIFT_TYPES);
+// Allow null for manual clearing
+const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES), z.literal('NULL')]); // 'NULL' string to represent null in select
 
 const fixedAssignmentSchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha debe ser YYYY-MM-DD"),
-    shift: shiftTypeSchema
+    shift: z.enum(SHIFT_TYPES) // Keep original enum here, null not allowed for fixed assignments
 });
 
 const employeePreferenceSchema = z.object({
@@ -59,7 +60,7 @@ const employeePreferenceSchema = z.object({
     fixedDaysOff: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD")).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
-        shift: shiftTypeSchema
+        shift: z.enum(SHIFT_TYPES) // Keep original enum here
     }).optional()
 });
 
@@ -305,6 +306,32 @@ export default function Home() {
     }, 50); // Short delay
   };
 
+  // --- Manual Schedule Editing ---
+    const handleManualShiftChange = (employeeId: number, date: string, newShiftValue: string) => {
+        if (!schedule) return;
+
+        const newShift = newShiftValue === 'NULL' ? null : newShiftValue as ShiftType;
+
+        // Create a deep copy of the schedule to modify
+        const updatedSchedule: Schedule = JSON.parse(JSON.stringify(schedule));
+
+        // Find the day and update the shift
+        const dayIndex = updatedSchedule.days.findIndex(d => d.date === date);
+        if (dayIndex !== -1) {
+            updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
+
+            // Recalculate totals for the updated schedule
+            calculateFinalTotals(updatedSchedule, employees);
+
+            // Re-validate the updated schedule
+            const newReport = validateSchedule(updatedSchedule, employees, absences, holidays);
+
+            // Update the state
+            setSchedule(updatedSchedule);
+            setReport(newReport);
+        }
+    };
+
 
   const getDayHeaders = useMemo(() => {
     if (!schedule) return [];
@@ -342,6 +369,9 @@ export default function Home() {
         { value: 4, label: 'Jueves' }, { value: 5, label: 'Viernes' }, { value: 6, label: 'Sábado' },
         { value: 0, label: 'Domingo' }
     ];
+
+     // Options for the manual shift change select dropdown
+     const manualShiftOptions = ['NULL', ...SHIFT_TYPES]; // 'NULL' string represents clearing the shift
 
   return (
     <div className="container mx-auto p-4 md:p-8">
@@ -394,7 +424,7 @@ export default function Home() {
                         <CardTitle className="text-lg font-medium">Empleados</CardTitle>
                         <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
                             <DialogTrigger asChild>
-                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset(); }}>
+                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined }}); }}>
                                     <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                 </Button>
                             </DialogTrigger>
@@ -430,15 +460,15 @@ export default function Home() {
                                     <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
                                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                          <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
                                             <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
                                         </div>
                                          <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
                                             <Label htmlFor="prefMonRest">Prefiere Lunes Franco</Label>
                                         </div>
                                          <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={field.value} onCheckedChange={field.onChange} /> )}/>
+                                            <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
                                             <Label htmlFor="prefThuT">Prefiere Jueves Turno T</Label>
                                         </div>
                                     </div>
@@ -505,7 +535,9 @@ export default function Home() {
                                                                     const newDays = checked
                                                                         ? [...currentDays, day.value]
                                                                         : currentDays.filter(d => d !== day.value);
-                                                                    field.onChange({ ...field.value, dayOfWeek: newDays });
+                                                                    // Ensure shift is defined if days are selected
+                                                                    const currentShift = field.value?.shift ?? 'M'; // Default to M if undefined
+                                                                    field.onChange({ dayOfWeek: newDays, shift: currentShift });
                                                                 }}
                                                             />
                                                             <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
@@ -515,7 +547,8 @@ export default function Home() {
                                                  <Label className="text-xs">Turno Fijo</Label>
                                                 <Select
                                                     value={field.value?.shift}
-                                                    onValueChange={(shift) => field.onChange({ ...field.value, shift: shift as ShiftType })}
+                                                    onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })} // Ensure dayOfWeek is array
+                                                    disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0} // Disable if no days selected
                                                 >
                                                     <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                     <SelectContent>
@@ -658,9 +691,17 @@ export default function Home() {
                         <ul className="space-y-2">
                            {absences.map(abs => {
                                 const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
+                                let formattedStart = 'Invalid Date';
+                                let formattedEnd = 'Invalid Date';
+                                try {
+                                    formattedStart = format(parseISO(abs.startDate), 'dd/MM');
+                                    formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
+                                } catch (e) {
+                                     console.error("Invalid date format in absence:", abs);
+                                }
                                 return (
                                     <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                        <span>{empName}: {abs.type} ({format(parseISO(abs.startDate), 'dd/MM')} - {format(parseISO(abs.endDate), 'dd/MM')})</span>
+                                        <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
                                         <div className="flex gap-1">
                                             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
                                                 <Edit className="h-4 w-4" />
@@ -712,9 +753,16 @@ export default function Home() {
                     </CardHeader>
                     <CardContent>
                         <ul className="space-y-2">
-                            {holidays.map(hol => (
+                            {holidays.map(hol => {
+                                 let formattedDate = 'Invalid Date';
+                                try {
+                                    formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
+                                } catch (e) {
+                                    console.error("Invalid date format in holiday:", hol);
+                                }
+                                return (
                                 <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                     <span>{format(parseISO(hol.date), 'dd/MM/yyyy')}: {hol.description}</span>
+                                     <span>{formattedDate}: {hol.description}</span>
                                      <div className="flex gap-1">
                                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
                                             <Edit className="h-4 w-4" />
@@ -724,7 +772,7 @@ export default function Home() {
                                         </Button>
                                     </div>
                                 </li>
-                            ))}
+                            )})}
                              {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
                         </ul>
                     </CardContent>
@@ -740,6 +788,7 @@ export default function Home() {
         <Card className="mb-8 overflow-x-auto shadow-md">
           <CardHeader>
             <CardTitle className="text-xl">Horario Generado: {MONTHS.find(m=>m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
+             <CardDescription>Puedes editar los turnos manualmente en la tabla. Los totales y la validación se actualizarán automáticamente.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table className="min-w-full border-collapse">
@@ -750,7 +799,7 @@ export default function Home() {
                     <TableHead
                       key={index}
                       className={cn(
-                        "border p-1 text-center text-xs font-semibold min-w-[40px]",
+                        "border p-1 text-center text-xs font-semibold min-w-[60px]", // Increased min-width for select
                         isWeekend && "bg-muted text-muted-foreground",
                         isHoliday && "bg-accent text-accent-foreground font-bold"
                       )}
@@ -778,10 +827,25 @@ export default function Home() {
                   <TableRow key={emp.id}>
                     <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap">{emp.name}</TableCell>
                     {schedule.days.map(day => {
-                      const shift = day.shifts[emp.id];
+                      const currentShift = day.shifts[emp.id];
+                      const selectValue = currentShift === null ? 'NULL' : currentShift;
                       return (
-                        <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-1 text-center text-xs font-medium", getShiftCellClass(shift))}>
-                          {shift || '-'}
+                        <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-0 text-center text-xs font-medium", getShiftCellClass(currentShift))}>
+                           <Select
+                                value={selectValue}
+                                onValueChange={(newValue) => handleManualShiftChange(emp.id, day.date, newValue)}
+                                >
+                               <SelectTrigger className={cn("w-full h-full text-xs border-0 rounded-none focus:ring-0 focus:ring-offset-0 px-1 py-0", getShiftCellClass(currentShift))} aria-label={`Shift for ${emp.name} on ${day.date}`}>
+                                   <SelectValue />
+                               </SelectTrigger>
+                               <SelectContent>
+                                    {manualShiftOptions.map(opt => (
+                                       <SelectItem key={opt} value={opt}>
+                                          {opt === 'NULL' ? '-' : opt}
+                                        </SelectItem>
+                                    ))}
+                               </SelectContent>
+                           </Select>
                         </TableCell>
                       );
                     })}
@@ -853,9 +917,9 @@ export default function Home() {
           <CardContent>
             <div className="space-y-3">
               {report.map((item, index) => (
-                 <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? "border-yellow-300" : "border-red-200") )}>
+                 <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? "border-yellow-300" : "border-red-200") )}>
                     <div className="flex items-start space-x-3">
-                       {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
+                       {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
                        <div>
                            <AlertTitle className="font-semibold">{item.rule}</AlertTitle>
                            {item.details && <AlertDescription className="text-sm">{item.details}</AlertDescription>}
@@ -871,3 +935,4 @@ export default function Home() {
     </div>
   );
 }
+

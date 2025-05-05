@@ -1,4 +1,5 @@
 
+
 import type {
   Employee,
   Absence,
@@ -525,7 +526,8 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
              }
          });
          // Check fixed weekly schedule
-         emp.preferences?.fixedWorkShift?.forEach(fixedW => {
+         const fixedW = emp.preferences?.fixedWorkShift; // It's an object, not an array
+          if(fixedW){
               const { dayOfWeek: daysOfWeek, shift: fixedShift } = fixedW;
               if(Array.isArray(daysOfWeek) && fixedShift){
                   schedule.days.forEach(day => {
@@ -553,7 +555,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                          }
                   })
               }
-         });
+          }
     });
 
    if (prio1Passed) {
@@ -1115,5 +1117,6 @@ export function generateSchedule(
 
   return { schedule, report };
 }
+
 
 

@@ -373,7 +373,8 @@ function assignShift(employeeId: number, dateStr: string, shift: ShiftType | nul
        // Basic check: can this shift be assigned according to rules?
        // This prevents the generator from assigning impossible shifts,
        // but manual override might bypass some rules (validation will catch).
-      if (canWorkShift(currentEmployeesState.find(e=>e.id === employeeId)!, dateStr, shift, schedule, currentEmployeesState)) {
+      const employee = currentEmployeesState.find(e => e.id === employeeId);
+      if (employee && canWorkShift(employee, dateStr, shift, schedule, currentEmployeesState)) {
            day.shifts[employeeId] = shift;
       } else {
            // Log if the generator tries to make an invalid assignment (should ideally not happen with good logic)
@@ -880,6 +881,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                 // Don't count unassigned if the employee is on LAO/LM for the entire month
                 const isOnLeaveFullMonth = absences.some(a =>
                     a.employeeId === emp.id &&
+                    isValid(parseISO(a.startDate)) && isValid(parseISO(a.endDate)) && // Check date validity
                     parseISO(a.startDate) <= startOfMonth(parseISO(day.date)) &&
                     parseISO(a.endDate) >= endOfMonth(parseISO(day.date))
                 );

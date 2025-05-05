@@ -17,7 +17,7 @@ import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType 
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
-import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft } from 'lucide-react';
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -91,6 +91,7 @@ const holidaySchema = z.object({
 
 // --- Component ---
 export default function Home() {
+  const [displayMode, setDisplayMode] = useState<'config' | 'viewing'>('config'); // 'config' or 'viewing'
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -261,6 +262,7 @@ export default function Home() {
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
+    setDisplayMode('viewing'); // Switch to viewing mode immediately
 
      // Prepare employee data with history
     const employeesWithHistory = employees.map(emp => ({
@@ -307,7 +309,7 @@ export default function Home() {
   };
 
   // --- Manual Schedule Editing ---
-    const handleManualShiftChange = (employeeId: number, date: string, newShiftValue: string) => {
+    const handleManualShiftChange = (employeeId: number, date: string, newShiftValue: string | null) => {
         if (!schedule) return;
 
         const newShift = newShiftValue === 'NULL' ? null : newShiftValue as ShiftType;
@@ -320,17 +322,44 @@ export default function Home() {
         if (dayIndex !== -1) {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
 
-            // Recalculate totals for the updated schedule
-            calculateFinalTotals(updatedSchedule, employees);
-
-            // Re-validate the updated schedule
-            const newReport = validateSchedule(updatedSchedule, employees, absences, holidays);
-
-            // Update the state
+            // Update the state without recalculating immediately
             setSchedule(updatedSchedule);
-            setReport(newReport);
+
+            // Clear the report as it's now potentially invalid
+            setReport([]);
         }
     };
+
+    // --- Recalculate & Revalidate ---
+    const handleRecalculate = () => {
+        if (!schedule) return;
+        setIsLoading(true); // Show loading state for recalculation
+        setReport([]);
+
+        // Create a deep copy to avoid direct state mutation before recalculation
+         const scheduleToRecalculate = JSON.parse(JSON.stringify(schedule));
+
+         setTimeout(() => {
+             try {
+                // Recalculate totals for the *current* state of the schedule
+                calculateFinalTotals(scheduleToRecalculate, employees);
+
+                // Re-validate the *current* state of the schedule
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays);
+
+                // Update the state with recalculated totals and new report
+                setSchedule(scheduleToRecalculate);
+                setReport(newReport);
+            } catch (error) {
+                console.error("Error during recalculation:", error);
+                setReport([{rule: "Recalculation Error", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Unknown error'}`}]);
+            } finally {
+                 setIsLoading(false);
+            }
+         }, 50) // Short delay for visual feedback
+
+
+    }
 
 
   const getDayHeaders = useMemo(() => {
@@ -375,563 +404,579 @@ export default function Home() {
 
   return (
     <div className="container mx-auto p-4 md:p-8">
-      <Card className="mb-8 shadow-md">
-        <CardHeader>
-          <CardTitle className="text-2xl font-bold text-primary">ShiftSage - Generador de Horarios</CardTitle>
-          <CardDescription>Generador de horarios para personal.</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          {/* Month/Year Selection and Generate Button */}
-          <div className="flex flex-col md:flex-row gap-4 items-end">
-               <div className="flex gap-4 w-full md:w-auto">
-                   <div className="flex-1">
-                       <Label htmlFor="month-select">Mes</Label>
-                       <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
-                           <SelectTrigger id="month-select">
-                               <SelectValue placeholder="Seleccionar mes" />
-                           </SelectTrigger>
-                           <SelectContent>
-                               {MONTHS.map(m => (
-                                   <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
-                               ))}
-                           </SelectContent>
-                       </Select>
-                   </div>
-                   <div className="flex-1">
-                       <Label htmlFor="year-select">Año</Label>
-                       <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
-                         <SelectTrigger id="year-select">
-                           <SelectValue placeholder="Select year" />
-                         </SelectTrigger>
-                         <SelectContent>
-                           {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
-                             <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                           ))}
-                         </SelectContent>
-                       </Select>
-                   </div>
-               </div>
-              <Button onClick={handleGenerateSchedule} disabled={isLoading} className="w-full md:w-auto">
-                {isLoading ? 'Generando...' : 'Generar Horario'}
-              </Button>
-          </div>
+       {displayMode === 'config' && (
+            <Card className="mb-8 shadow-md">
+                <CardHeader>
+                <CardTitle className="text-2xl font-bold text-primary">ShiftSage - Configuración</CardTitle>
+                <CardDescription>Configure los parámetros para la generación del horario.</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                {/* Month/Year Selection and Generate Button */}
+                <div className="flex flex-col md:flex-row gap-4 items-end">
+                    <div className="flex gap-4 w-full md:w-auto">
+                        <div className="flex-1">
+                            <Label htmlFor="month-select">Mes</Label>
+                            <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+                                <SelectTrigger id="month-select">
+                                    <SelectValue placeholder="Seleccionar mes" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {MONTHS.map(m => (
+                                        <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                        <div className="flex-1">
+                            <Label htmlFor="year-select">Año</Label>
+                            <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                                <SelectTrigger id="year-select">
+                                <SelectValue placeholder="Select year" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
+                                    <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                                ))}
+                                </SelectContent>
+                            </Select>
+                        </div>
+                    </div>
+                    <Button onClick={handleGenerateSchedule} disabled={isLoading} className="w-full md:w-auto">
+                        {isLoading ? 'Generando...' : 'Generar Horario'}
+                    </Button>
+                </div>
 
-            {/* Configuration Sections */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                {/* Employees Section */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-lg font-medium">Empleados</CardTitle>
-                        <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
-                            <DialogTrigger asChild>
-                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined }}); }}>
-                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-                                <DialogHeader>
-                                    <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
-                                </DialogHeader>
-                                <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
-                                     {/* Basic Info */}
-                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                        <div>
-                                            <Label htmlFor="name">Nombre</Label>
-                                            <Input id="name" {...employeeForm.register("name")} />
-                                            {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
-                                        </div>
-                                        <div className="flex items-center pt-6 space-x-2">
-                                           <Controller
-                                                name="eligibleWeekend"
-                                                control={employeeForm.control}
-                                                render={({ field }) => (
-                                                    <Checkbox
-                                                        id="eligibleWeekend"
-                                                        checked={field.value}
-                                                        onCheckedChange={field.onChange}
+                    {/* Configuration Sections */}
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                        {/* Employees Section */}
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-lg font-medium">Empleados</CardTitle>
+                                <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined }}); }}>
+                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+                                        <DialogHeader>
+                                            <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
+                                        </DialogHeader>
+                                        <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
+                                            {/* Basic Info */}
+                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                <div>
+                                                    <Label htmlFor="name">Nombre</Label>
+                                                    <Input id="name" {...employeeForm.register("name")} />
+                                                    {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
+                                                </div>
+                                                <div className="flex items-center pt-6 space-x-2">
+                                                <Controller
+                                                        name="eligibleWeekend"
+                                                        control={employeeForm.control}
+                                                        render={({ field }) => (
+                                                            <Checkbox
+                                                                id="eligibleWeekend"
+                                                                checked={field.value}
+                                                                onCheckedChange={field.onChange}
+                                                            />
+                                                        )}
                                                     />
-                                                )}
-                                            />
-                                            <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
-                                        </div>
-                                    </div>
+                                                    <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
+                                                </div>
+                                            </div>
 
-                                     {/* Preferences */}
-                                    <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
-                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                         <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                            <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
-                                        </div>
-                                         <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                            <Label htmlFor="prefMonRest">Prefiere Lunes Franco</Label>
-                                        </div>
-                                         <div className="flex items-center space-x-2">
-                                            <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                            <Label htmlFor="prefThuT">Prefiere Jueves Turno T</Label>
-                                        </div>
-                                    </div>
+                                            {/* Preferences */}
+                                            <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
+                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                <div className="flex items-center space-x-2">
+                                                    <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
+                                                    <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
+                                                    <Label htmlFor="prefMonRest">Prefiere Lunes Franco</Label>
+                                                </div>
+                                                <div className="flex items-center space-x-2">
+                                                    <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
+                                                    <Label htmlFor="prefThuT">Prefiere Jueves Turno T</Label>
+                                                </div>
+                                            </div>
 
-                                    {/* Fixed Assignments */}
-                                    <div className="space-y-2">
-                                        <Label>Asignaciones Fijas</Label>
-                                        {fixedAssignmentsFields.map((field, index) => (
-                                            <div key={field.id} className="flex gap-2 items-center">
-                                                <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
-                                                 <Controller
-                                                    name={`preferences.fixedAssignments.${index}.shift`}
+                                            {/* Fixed Assignments */}
+                                            <div className="space-y-2">
+                                                <Label>Asignaciones Fijas</Label>
+                                                {fixedAssignmentsFields.map((field, index) => (
+                                                    <div key={field.id} className="flex gap-2 items-center">
+                                                        <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                        <Controller
+                                                            name={`preferences.fixedAssignments.${index}.shift`}
+                                                            control={employeeForm.control}
+                                                            render={({ field }) => (
+                                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                    <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {SHIFT_TYPES.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                        />
+                                                        <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                    </div>
+                                                ))}
+                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
+                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
+
+                                                <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
+                                            </div>
+
+                                            {/* Fixed Days Off */}
+                                            <div className="space-y-2">
+                                                <Label>Francos Fijos (YYYY-MM-DD)</Label>
+                                                {fixedDaysOffFields.map((field, index) => (
+                                                    <div key={field.id} className="flex gap-2 items-center">
+                                                        <Input type="date" {...employeeForm.register(`preferences.fixedDaysOff.${index}`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                        {/* Display potential error for this specific field */}
+                                                        {employeeForm.formState.errors.preferences?.fixedDaysOff?.[index] && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedDaysOff[index]?.message}</p>}
+                                                        <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedDayOff(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                    </div>
+                                                ))}
+                                                <Button type="button" variant="outline" size="sm" onClick={() => appendFixedDayOff('')}>+ Franco</Button>
+                                            </div>
+
+
+                                            {/* Fixed Work Shift */}
+                                            <div className="space-y-2 border-t pt-4">
+                                                <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
+                                                <Controller
+                                                    name="preferences.fixedWorkShift"
                                                     control={employeeForm.control}
                                                     render={({ field }) => (
-                                                         <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                            <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                    <div className="space-y-2">
+                                                        <Label className="text-xs">Días de la Semana</Label>
+                                                        <div className="grid grid-cols-3 gap-2">
+                                                            {daysOfWeekOptions.map(day => (
+                                                                <div key={day.value} className="flex items-center space-x-2">
+                                                                    <Checkbox
+                                                                        id={`fixedDay-${day.value}`}
+                                                                        checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
+                                                                        onCheckedChange={(checked) => {
+                                                                            const currentDays = field.value?.dayOfWeek ?? [];
+                                                                            const newDays = checked
+                                                                                ? [...currentDays, day.value]
+                                                                                : currentDays.filter(d => d !== day.value);
+                                                                            // Ensure shift is defined if days are selected
+                                                                            const currentShift = field.value?.shift ?? 'M'; // Default to M if undefined
+                                                                            field.onChange({ dayOfWeek: newDays, shift: currentShift });
+                                                                        }}
+                                                                    />
+                                                                    <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                        <Label className="text-xs">Turno Fijo</Label>
+                                                        <Select
+                                                            value={field.value?.shift}
+                                                            onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })} // Ensure dayOfWeek is array
+                                                            disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0} // Disable if no days selected
+                                                        >
+                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
-                                                                {SHIFT_TYPES.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                {SHIFT_TYPES.filter(s => s === 'M' || s === 'T').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                                    </div>
+                                                    )}
+                                                />
+                                            </div>
+
+
+                                            <DialogFooter>
+                                                <DialogClose asChild>
+                                                    <Button type="button" variant="outline">Cancelar</Button>
+                                                </DialogClose>
+                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </CardHeader>
+                            <CardContent>
+                                <ul className="space-y-2">
+                                    {employees.map(emp => (
+                                        <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                            {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
+                                            <div className="flex gap-1">
+                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
+                                                    <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </li>
+                                    ))}
+                                    {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos.</p>}
+                                </ul>
+                                {/* History Input Section */}
+                                <div className="mt-4 space-y-4 border-t pt-4">
+                                    <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
+                                    {employees.map(emp => (
+                                        <div key={`hist-${emp.id}`} className="space-y-1">
+                                            <p className="text-sm font-medium">{emp.name}</p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {getPreviousMonthDates().map(dateStr => (
+                                                    <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
+                                                        <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
+                                                        <Select
+                                                            value={historyInputs[emp.id]?.[dateStr] || '-'} // Use '-' as placeholder value
+                                                            onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
+                                                        >
+                                                            <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
+                                                                <SelectValue placeholder="-" />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="-">- (Vacío)</SelectItem>
+                                                                {SHIFT_TYPES.map(st => (
+                                                                    <SelectItem key={st} value={st}>{st}</SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </CardContent>
+                        </Card>
+
+                        {/* Absences Section */}
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
+                                <Dialog open={isAbsenceDialogOpen} onOpenChange={setIsAbsenceDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); }}>
+                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                        </Button>
+                                    </DialogTrigger>
+                                <DialogContent className="sm:max-w-[425px]">
+                                        <DialogHeader>
+                                            <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
+                                        </DialogHeader>
+                                        <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
+                                            <div>
+                                                <Label htmlFor="employeeId">Empleado</Label>
+                                                <Controller
+                                                    name="employeeId"
+                                                    control={absenceForm.control}
+                                                    render={({ field }) => (
+                                                        <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
                                                             </SelectContent>
                                                         </Select>
                                                     )}
                                                 />
-                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
                                             </div>
-                                        ))}
-                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
-                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
-
-                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
-                                    </div>
-
-                                     {/* Fixed Days Off */}
-                                    <div className="space-y-2">
-                                        <Label>Francos Fijos (YYYY-MM-DD)</Label>
-                                        {fixedDaysOffFields.map((field, index) => (
-                                            <div key={field.id} className="flex gap-2 items-center">
-                                                 <Input type="date" {...employeeForm.register(`preferences.fixedDaysOff.${index}`)} placeholder="YYYY-MM-DD" className="flex-1"/>
-                                                 {/* Display potential error for this specific field */}
-                                                 {employeeForm.formState.errors.preferences?.fixedDaysOff?.[index] && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedDaysOff[index]?.message}</p>}
-                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedDayOff(index)}><Trash2 className="h-4 w-4"/></Button>
+                                            <div>
+                                                <Label htmlFor="type">Tipo</Label>
+                                                <Controller
+                                                    name="type"
+                                                    control={absenceForm.control}
+                                                    render={({ field }) => (
+                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="LAO">LAO</SelectItem>
+                                                                <SelectItem value="LM">LM</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    )} />
+                                                {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
                                             </div>
-                                        ))}
-                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedDayOff('')}>+ Franco</Button>
-                                    </div>
-
-
-                                    {/* Fixed Work Shift */}
-                                    <div className="space-y-2 border-t pt-4">
-                                        <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
-                                         <Controller
-                                            name="preferences.fixedWorkShift"
-                                            control={employeeForm.control}
-                                            render={({ field }) => (
-                                            <div className="space-y-2">
-                                                <Label className="text-xs">Días de la Semana</Label>
-                                                 <div className="grid grid-cols-3 gap-2">
-                                                    {daysOfWeekOptions.map(day => (
-                                                        <div key={day.value} className="flex items-center space-x-2">
-                                                            <Checkbox
-                                                                id={`fixedDay-${day.value}`}
-                                                                checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
-                                                                onCheckedChange={(checked) => {
-                                                                    const currentDays = field.value?.dayOfWeek ?? [];
-                                                                    const newDays = checked
-                                                                        ? [...currentDays, day.value]
-                                                                        : currentDays.filter(d => d !== day.value);
-                                                                    // Ensure shift is defined if days are selected
-                                                                    const currentShift = field.value?.shift ?? 'M'; // Default to M if undefined
-                                                                    field.onChange({ dayOfWeek: newDays, shift: currentShift });
-                                                                }}
-                                                            />
-                                                            <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
-                                                        </div>
-                                                    ))}
+                                            <div>
+                                                <Label htmlFor="startDate">Fecha Inicio</Label>
+                                                <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
+                                                {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
+                                            </div>
+                                            <div>
+                                                <Label htmlFor="endDate">Fecha Fin</Label>
+                                                <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
+                                                {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
+                                            </div>
+                                            <DialogFooter>
+                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </CardHeader>
+                            <CardContent>
+                                <ul className="space-y-2">
+                                {absences.map(abs => {
+                                        const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
+                                        let formattedStart = 'Invalid Date';
+                                        let formattedEnd = 'Invalid Date';
+                                        try {
+                                            formattedStart = format(parseISO(abs.startDate), 'dd/MM');
+                                            formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
+                                        } catch (e) {
+                                            console.error("Invalid date format in absence:", abs);
+                                        }
+                                        return (
+                                            <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
+                                                <div className="flex gap-1">
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
+                                                        <Edit className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
                                                 </div>
-                                                 <Label className="text-xs">Turno Fijo</Label>
-                                                <Select
-                                                    value={field.value?.shift}
-                                                    onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })} // Ensure dayOfWeek is array
-                                                    disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0} // Disable if no days selected
-                                                >
-                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {SHIFT_TYPES.filter(s => s === 'M' || s === 'T').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                                 <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                            </li>
+                                        );
+                                })}
+                                    {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
+                                </ul>
+                            </CardContent>
+                        </Card>
+
+                        {/* Holidays Section */}
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                <CardTitle className="text-lg font-medium">Feriados</CardTitle>
+                                <Dialog open={isHolidayDialogOpen} onOpenChange={setIsHolidayDialogOpen}>
+                                    <DialogTrigger asChild>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); }}>
+                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="sm:max-w-[425px]">
+                                        <DialogHeader>
+                                            <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
+                                        </DialogHeader>
+                                        <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
+                                            <div>
+                                                <Label htmlFor="holidayDate">Fecha</Label>
+                                                <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
+                                                {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
                                             </div>
-                                            )}
-                                        />
-                                    </div>
-
-
-                                    <DialogFooter>
-                                        <DialogClose asChild>
-                                            <Button type="button" variant="outline">Cancelar</Button>
-                                        </DialogClose>
-                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
-                                    </DialogFooter>
-                                </form>
-                            </DialogContent>
-                        </Dialog>
-                    </CardHeader>
-                    <CardContent>
-                        <ul className="space-y-2">
-                            {employees.map(emp => (
-                                <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                    {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
-                                    <div className="flex gap-1">
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </li>
-                            ))}
-                            {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos.</p>}
-                        </ul>
-                         {/* History Input Section */}
-                        <div className="mt-4 space-y-4 border-t pt-4">
-                            <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
-                            {employees.map(emp => (
-                                <div key={`hist-${emp.id}`} className="space-y-1">
-                                    <p className="text-sm font-medium">{emp.name}</p>
-                                    <div className="grid grid-cols-3 gap-2">
-                                        {getPreviousMonthDates().map(dateStr => (
-                                            <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
-                                                 <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
-                                                 <Select
-                                                    value={historyInputs[emp.id]?.[dateStr] || '-'} // Use '-' as placeholder value
-                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
-                                                >
-                                                    <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
-                                                        <SelectValue placeholder="-" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="-">- (Vacío)</SelectItem>
-                                                        {SHIFT_TYPES.map(st => (
-                                                            <SelectItem key={st} value={st}>{st}</SelectItem>
-                                                        ))}
-                                                    </SelectContent>
-                                                </Select>
+                                            <div>
+                                                <Label htmlFor="holidayDescription">Descripción</Label>
+                                                <Input id="holidayDescription" {...holidayForm.register("description")} />
+                                                {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
                                             </div>
-                                        ))}
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-                    </CardContent>
-                </Card>
-
-                {/* Absences Section */}
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
-                         <Dialog open={isAbsenceDialogOpen} onOpenChange={setIsAbsenceDialogOpen}>
-                            <DialogTrigger asChild>
-                                <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); }}>
-                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                </Button>
-                            </DialogTrigger>
-                           <DialogContent className="sm:max-w-[425px]">
-                                <DialogHeader>
-                                    <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
-                                </DialogHeader>
-                                <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
-                                     <div>
-                                        <Label htmlFor="employeeId">Empleado</Label>
-                                        <Controller
-                                            name="employeeId"
-                                            control={absenceForm.control}
-                                            render={({ field }) => (
-                                                <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
-                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
-                                                    </SelectContent>
-                                                </Select>
-                                            )}
-                                        />
-                                        {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="type">Tipo</Label>
-                                        <Controller
-                                            name="type"
-                                            control={absenceForm.control}
-                                            render={({ field }) => (
-                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="LAO">LAO</SelectItem>
-                                                        <SelectItem value="LM">LM</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            )} />
-                                         {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
-                                    </div>
-                                     <div>
-                                        <Label htmlFor="startDate">Fecha Inicio</Label>
-                                        <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
-                                         {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
-                                    </div>
-                                     <div>
-                                        <Label htmlFor="endDate">Fecha Fin</Label>
-                                        <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
-                                         {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
-                                    </div>
-                                    <DialogFooter>
-                                         <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
-                                    </DialogFooter>
-                                </form>
-                            </DialogContent>
-                        </Dialog>
-                    </CardHeader>
-                    <CardContent>
-                        <ul className="space-y-2">
-                           {absences.map(abs => {
-                                const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
-                                let formattedStart = 'Invalid Date';
-                                let formattedEnd = 'Invalid Date';
-                                try {
-                                    formattedStart = format(parseISO(abs.startDate), 'dd/MM');
-                                    formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
-                                } catch (e) {
-                                     console.error("Invalid date format in absence:", abs);
-                                }
-                                return (
-                                    <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                        <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
-                                        <div className="flex gap-1">
-                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
-                                                <Edit className="h-4 w-4" />
-                                            </Button>
-                                             <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
-                                                <Trash2 className="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </li>
-                                );
-                           })}
-                            {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
-                        </ul>
-                    </CardContent>
-                </Card>
-
-                {/* Holidays Section */}
-                 <Card>
-                    <CardHeader className="flex flex-row items-center justify-between pb-2">
-                        <CardTitle className="text-lg font-medium">Feriados</CardTitle>
-                         <Dialog open={isHolidayDialogOpen} onOpenChange={setIsHolidayDialogOpen}>
-                            <DialogTrigger asChild>
-                                <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); }}>
-                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                </Button>
-                            </DialogTrigger>
-                             <DialogContent className="sm:max-w-[425px]">
-                                <DialogHeader>
-                                    <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
-                                </DialogHeader>
-                                <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
-                                    <div>
-                                        <Label htmlFor="holidayDate">Fecha</Label>
-                                        <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
-                                        {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="holidayDescription">Descripción</Label>
-                                        <Input id="holidayDescription" {...holidayForm.register("description")} />
-                                         {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
-                                    </div>
-                                    <DialogFooter>
-                                         <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
-                                    </DialogFooter>
-                                </form>
-                            </DialogContent>
-                        </Dialog>
-                    </CardHeader>
-                    <CardContent>
-                        <ul className="space-y-2">
-                            {holidays.map(hol => {
-                                 let formattedDate = 'Invalid Date';
-                                try {
-                                    formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
-                                } catch (e) {
-                                    console.error("Invalid date format in holiday:", hol);
-                                }
-                                return (
-                                <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                     <span>{formattedDate}: {hol.description}</span>
-                                     <div className="flex gap-1">
-                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
-                                            <Edit className="h-4 w-4" />
-                                        </Button>
-                                         <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
-                                            <Trash2 className="h-4 w-4" />
-                                        </Button>
-                                    </div>
-                                </li>
-                            )})}
-                             {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
-                        </ul>
-                    </CardContent>
-                </Card>
-            </div>
-
-        </CardContent>
-      </Card>
-
-      {isLoading && <div className="text-center p-8"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary mx-auto"></div><p className="mt-4">Generando horario...</p></div>}
-
-      {schedule && !isLoading && (
-        <Card className="mb-8 overflow-x-auto shadow-md">
-          <CardHeader>
-            <CardTitle className="text-xl">Horario Generado: {MONTHS.find(m=>m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
-             <CardDescription>Puedes editar los turnos manualmente en la tabla. Los totales y la validación se actualizarán automáticamente.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table className="min-w-full border-collapse">
-              <TableHeader>
-                <TableRow className="bg-secondary">
-                  <TableHead className="sticky left-0 bg-secondary z-10 border p-1 text-center font-semibold">Empleado</TableHead>
-                  {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
-                    <TableHead
-                      key={index}
-                      className={cn(
-                        "border p-1 text-center text-xs font-semibold min-w-[60px]", // Increased min-width for select
-                        isWeekend && "bg-muted text-muted-foreground",
-                        isHoliday && "bg-accent text-accent-foreground font-bold"
-                      )}
-                    >
-                      <div>{dayOfMonth}</div>
-                      <div>{dayOfWeek}</div>
-                    </TableHead>
-                  ))}
-                  {/* Totals Columns Headers */}
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[440px] bg-secondary z-10", getTotalsCellClass())}>Trab</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[400px] bg-secondary z-10", getTotalsCellClass())}>M</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[360px] bg-secondary z-10", getTotalsCellClass())}>T</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[320px] bg-secondary z-10", getTotalsCellClass())}>S.Lib</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[280px] bg-secondary z-10", getTotalsCellClass())}>D.Lib</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[240px] bg-secondary z-10", getTotalsCellClass())}>F</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[200px] bg-secondary z-10", getTotalsCellClass())}>C</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[160px] bg-secondary z-10", getTotalsCellClass())}>D</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[120px] bg-secondary z-10", getTotalsCellClass())}>LM</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[80px] bg-secondary z-10", getTotalsCellClass())}>LAO</TableHead>
-                   <TableHead className={cn("border p-1 text-center font-semibold sticky right-[0px] bg-secondary z-10", getTotalsCellClass())}>Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {employees.map(emp => (
-                  <TableRow key={emp.id}>
-                    <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap">{emp.name}</TableCell>
-                    {schedule.days.map(day => {
-                      const currentShift = day.shifts[emp.id];
-                      const selectValue = currentShift === null ? 'NULL' : currentShift;
-                      return (
-                        <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-0 text-center text-xs font-medium", getShiftCellClass(currentShift))}>
-                           <Select
-                                value={selectValue}
-                                onValueChange={(newValue) => handleManualShiftChange(emp.id, day.date, newValue)}
-                                >
-                               <SelectTrigger className={cn("w-full h-full text-xs border-0 rounded-none focus:ring-0 focus:ring-offset-0 px-1 py-0", getShiftCellClass(currentShift))} aria-label={`Shift for ${emp.name} on ${day.date}`}>
-                                   <SelectValue />
-                               </SelectTrigger>
-                               <SelectContent>
-                                    {manualShiftOptions.map(opt => (
-                                       <SelectItem key={opt} value={opt}>
-                                          {opt === 'NULL' ? '-' : opt}
-                                        </SelectItem>
-                                    ))}
-                               </SelectContent>
-                           </Select>
-                        </TableCell>
-                      );
-                    })}
-                     {/* Employee Totals */}
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[440px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.workedDays ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[400px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.M ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[360px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.T ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[320px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSaturdays ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[280px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSundays ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[240px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.F ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[200px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.C ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[160px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[120px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LM ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[80px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LAO ?? 0}</TableCell>
-                     <TableCell className={cn("border p-1 text-center text-xs font-semibold sticky right-[0px] bg-background z-10", getTotalsCellClass())}>
-                         { (schedule.employeeTotals[emp.id]?.workedDays ?? 0) +
-                           (schedule.employeeTotals[emp.id]?.F ?? 0) +
-                           (schedule.employeeTotals[emp.id]?.C ?? 0) +
-                           (schedule.employeeTotals[emp.id]?.D ?? 0) +
-                           (schedule.employeeTotals[emp.id]?.LM ?? 0) +
-                           (schedule.employeeTotals[emp.id]?.LAO ?? 0)
-                         }
-                     </TableCell>
-                  </TableRow>
-                ))}
-                {/* Daily Totals Rows */}
-                <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                   <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Mañana (TM)</TableCell>
-                   {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
-                   <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-                 <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                    <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Tarde (TT)</TableCell>
-                    {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
-                   <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-                  <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                    <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Descanso (TD)</TableCell>
-                    {schedule.days.map(day => <TableCell key={`TD-${day.date}`} className="border p-1 text-center text-xs">{day.totals.D}</TableCell>)}
-                   <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-                  <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                    <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Feriado (TF)</TableCell>
-                    {schedule.days.map(day => <TableCell key={`TF-${day.date}`} className="border p-1 text-center text-xs">{day.totals.F}</TableCell>)}
-                   <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-                  <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                    <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Compensat. (TC)</TableCell>
-                    {schedule.days.map(day => <TableCell key={`TC-${day.date}`} className="border p-1 text-center text-xs">{day.totals.C}</TableCell>)}
-                    <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-                  <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                    <TableCell className="sticky left-0 z-10 border p-1 text-sm">TOTAL PERSONAL (TPT)</TableCell>
-                    {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
-                   <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
-                 </TableRow>
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
-
-      {report.length > 0 && !isLoading && (
-        <Card className="shadow-md">
-          <CardHeader>
-            <CardTitle className="text-xl">Reporte de Validación</CardTitle>
-            <CardDescription>Resultados de la verificación de reglas obligatorias y flexibles.</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              {report.map((item, index) => (
-                 <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? "border-yellow-300" : "border-red-200") )}>
-                    <div className="flex items-start space-x-3">
-                       {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
-                       <div>
-                           <AlertTitle className="font-semibold">{item.rule}</AlertTitle>
-                           {item.details && <AlertDescription className="text-sm">{item.details}</AlertDescription>}
-                       </div>
+                                            <DialogFooter>
+                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
+                                            </DialogFooter>
+                                        </form>
+                                    </DialogContent>
+                                </Dialog>
+                            </CardHeader>
+                            <CardContent>
+                                <ul className="space-y-2">
+                                    {holidays.map(hol => {
+                                        let formattedDate = 'Invalid Date';
+                                        try {
+                                            formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
+                                        } catch (e) {
+                                            console.error("Invalid date format in holiday:", hol);
+                                        }
+                                        return (
+                                        <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                            <span>{formattedDate}: {hol.description}</span>
+                                            <div className="flex gap-1">
+                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
+                                                    <Edit className="h-4 w-4" />
+                                                </Button>
+                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
+                                                    <Trash2 className="h-4 w-4" />
+                                                </Button>
+                                            </div>
+                                        </li>
+                                    )})}
+                                    {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
+                                </ul>
+                            </CardContent>
+                        </Card>
                     </div>
 
-                </Alert>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+                </CardContent>
+            </Card>
+        )}
+
+      {displayMode === 'viewing' && (
+         <>
+             {isLoading && (
+                <div className="text-center p-8"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary mx-auto"></div><p className="mt-4">Generando o recalculando horario...</p></div>
+             )}
+
+            {!isLoading && schedule && (
+                <Card className="mb-8 overflow-x-auto shadow-md">
+                <CardHeader>
+                    <div className="flex justify-between items-center">
+                        <div>
+                             <CardTitle className="text-xl">Horario Generado: {MONTHS.find(m=>m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
+                             <CardDescription>Puedes editar los turnos manualmente en la tabla. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
+                        </div>
+                         <div className="flex gap-2">
+                            <Button variant="outline" onClick={() => setDisplayMode('config')}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
+                             <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
+                         </div>
+                    </div>
+                </CardHeader>
+                <CardContent>
+                    <Table className="min-w-full border-collapse">
+                    <TableHeader>
+                        <TableRow className="bg-secondary">
+                        <TableHead className="sticky left-0 bg-secondary z-10 border p-1 text-center font-semibold">Empleado</TableHead>
+                        {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
+                            <TableHead
+                            key={index}
+                            className={cn(
+                                "border p-1 text-center text-xs font-semibold min-w-[60px]", // Increased min-width for select
+                                isWeekend && "bg-muted text-muted-foreground",
+                                isHoliday && "bg-accent text-accent-foreground font-bold"
+                            )}
+                            >
+                            <div>{dayOfMonth}</div>
+                            <div>{dayOfWeek}</div>
+                            </TableHead>
+                        ))}
+                        {/* Totals Columns Headers */}
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[440px] bg-secondary z-10", getTotalsCellClass())}>Trab</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[400px] bg-secondary z-10", getTotalsCellClass())}>M</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[360px] bg-secondary z-10", getTotalsCellClass())}>T</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[320px] bg-secondary z-10", getTotalsCellClass())}>S.Lib</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[280px] bg-secondary z-10", getTotalsCellClass())}>D.Lib</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[240px] bg-secondary z-10", getTotalsCellClass())}>F</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[200px] bg-secondary z-10", getTotalsCellClass())}>C</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[160px] bg-secondary z-10", getTotalsCellClass())}>D</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[120px] bg-secondary z-10", getTotalsCellClass())}>LM</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[80px] bg-secondary z-10", getTotalsCellClass())}>LAO</TableHead>
+                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[0px] bg-secondary z-10", getTotalsCellClass())}>Total</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        {employees.map(emp => (
+                        <TableRow key={emp.id}>
+                            <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap">{emp.name}</TableCell>
+                            {schedule.days.map(day => {
+                            const currentShift = day.shifts[emp.id];
+                            const selectValue = currentShift === null ? 'NULL' : currentShift;
+                            return (
+                                <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-0 text-center text-xs font-medium", getShiftCellClass(currentShift))}>
+                                <Select
+                                        value={selectValue}
+                                        onValueChange={(newValue) => handleManualShiftChange(emp.id, day.date, newValue)}
+                                        >
+                                    <SelectTrigger className={cn("w-full h-full text-xs border-0 rounded-none focus:ring-0 focus:ring-offset-0 px-1 py-0", getShiftCellClass(currentShift))} aria-label={`Shift for ${emp.name} on ${day.date}`}>
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                            {manualShiftOptions.map(opt => (
+                                            <SelectItem key={opt} value={opt}>
+                                                {opt === 'NULL' ? '-' : opt}
+                                                </SelectItem>
+                                            ))}
+                                    </SelectContent>
+                                </Select>
+                                </TableCell>
+                            );
+                            })}
+                            {/* Employee Totals */}
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[440px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.workedDays ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[400px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.M ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[360px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.T ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[320px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSaturdays ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[280px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSundays ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[240px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.F ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[200px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.C ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[160px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[120px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LM ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[80px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LAO ?? 0}</TableCell>
+                            <TableCell className={cn("border p-1 text-center text-xs font-semibold sticky right-[0px] bg-background z-10", getTotalsCellClass())}>
+                                { (schedule.employeeTotals[emp.id]?.workedDays ?? 0) +
+                                (schedule.employeeTotals[emp.id]?.F ?? 0) +
+                                (schedule.employeeTotals[emp.id]?.C ?? 0) +
+                                (schedule.employeeTotals[emp.id]?.D ?? 0) +
+                                (schedule.employeeTotals[emp.id]?.LM ?? 0) +
+                                (schedule.employeeTotals[emp.id]?.LAO ?? 0)
+                                }
+                            </TableCell>
+                        </TableRow>
+                        ))}
+                        {/* Daily Totals Rows */}
+                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                        <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Mañana (TM)</TableCell>
+                        {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
+                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                            <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Tarde (TT)</TableCell>
+                            {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
+                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                            <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Descanso (TD)</TableCell>
+                            {schedule.days.map(day => <TableCell key={`TD-${day.date}`} className="border p-1 text-center text-xs">{day.totals.D}</TableCell>)}
+                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                            <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Feriado (TF)</TableCell>
+                            {schedule.days.map(day => <TableCell key={`TF-${day.date}`} className="border p-1 text-center text-xs">{day.totals.F}</TableCell>)}
+                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                            <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Compensat. (TC)</TableCell>
+                            {schedule.days.map(day => <TableCell key={`TC-${day.date}`} className="border p-1 text-center text-xs">{day.totals.C}</TableCell>)}
+                            <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                        <TableRow className={cn("font-bold", getTotalsCellClass())}>
+                            <TableCell className="sticky left-0 z-10 border p-1 text-sm">TOTAL PERSONAL (TPT)</TableCell>
+                            {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
+                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        </TableRow>
+                    </TableBody>
+                    </Table>
+                </CardContent>
+                </Card>
+            )}
+
+             {report.length > 0 && !isLoading && (
+                <Card className="shadow-md">
+                <CardHeader>
+                    <CardTitle className="text-xl">Reporte de Validación</CardTitle>
+                    <CardDescription>Resultados de la verificación de reglas obligatorias y flexibles.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="space-y-3">
+                    {report.map((item, index) => (
+                        <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? "border-yellow-300" : "border-red-200") )}>
+                            <div className="flex items-start space-x-3">
+                            {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
+                            <div>
+                                <AlertTitle className="font-semibold">{item.rule}</AlertTitle>
+                                {item.details && <AlertDescription className="text-sm">{item.details}</AlertDescription>}
+                            </div>
+                            </div>
+
+                        </Alert>
+                    ))}
+                    </div>
+                </CardContent>
+                </Card>
+            )}
+        </>
+       )}
     </div>
   );
 }

@@ -25,9 +25,9 @@ import * as z from 'zod';
 // --- Initial Data (Now defaults, user can modify) ---
 const defaultEmployees: Employee[] = [
     { id: 1, name: 'Rios', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: { fixedAssignments: [{ date: '2025-05-01', shift: 'M' }, { date: '2025-05-19', shift: 'T' }, { date: '2025-05-25', shift: 'M' }], fixedDaysOff: ['2025-05-17', '2025-05-18'] }, history: {} },
+    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {} }, // Removed fixed assignments and days off
     { id: 3, name: 'Montu', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: { fixedAssignments: [{ date: '2025-05-24', shift: 'M' }, { date: '2025-05-25', shift: 'M' }] }, history: {} },
+    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: {}, history: {} }, // Removed fixed assignments
     { id: 5, name: 'Garavaglia', eligibleWeekend: true, preferences: {}, history: {} },
     { id: 6, name: 'Forni', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {} },
     { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {} }
@@ -894,37 +894,16 @@ export default function Home() {
                         <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Mañana (TM)</TableCell>
                         <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
-                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> Removed colspan */}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Tarde (TT)</TableCell>
                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
-                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
-                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Descanso (TD)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
-                            {schedule.days.map(day => <TableCell key={`TD-${day.date}`} className="border p-1 text-center text-xs">{day.totals.D}</TableCell>)}
-                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
-                        </TableRow>
-                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Feriado (TF)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
-                            {schedule.days.map(day => <TableCell key={`TF-${day.date}`} className="border p-1 text-center text-xs">{day.totals.F}</TableCell>)}
-                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
-                        </TableRow>
-                        <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Compensat. (TC)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
-                            {schedule.days.map(day => <TableCell key={`TC-${day.date}`} className="border p-1 text-center text-xs">{day.totals.C}</TableCell>)}
-                           {/*  <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
-                        </TableRow>
-                        <TableRow className={cn("font-bold", getTotalsCellClass())}>
+                         <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">TOTAL PERSONAL (TPT)</TableCell>
                              <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
-                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                     </TableBody>
                     </Table>
@@ -963,3 +942,6 @@ export default function Home() {
 }
 
 
+
+
+    

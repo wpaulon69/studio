@@ -838,6 +838,8 @@ export default function Home() {
                     <TableHeader>
                         <TableRow className="bg-secondary">
                         <TableHead className="sticky left-0 bg-secondary z-10 border p-1 text-center font-semibold">Empleado</TableHead>
+                        <TableHead className={cn("sticky left-[120px] bg-secondary z-10 border p-1 text-center font-semibold", getTotalsCellClass())}>D</TableHead> {/* Moved Total D header */}
+
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead
                             key={index}
@@ -851,24 +853,15 @@ export default function Home() {
                             <div>{dayOfWeek}</div>
                             </TableHead>
                         ))}
-                        {/* Totals Columns Headers */}
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[440px] bg-secondary z-10", getTotalsCellClass())}>Trab</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[400px] bg-secondary z-10", getTotalsCellClass())}>M</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[360px] bg-secondary z-10", getTotalsCellClass())}>T</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[320px] bg-secondary z-10", getTotalsCellClass())}>S.Lib</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[280px] bg-secondary z-10", getTotalsCellClass())}>D.Lib</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[240px] bg-secondary z-10", getTotalsCellClass())}>F</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[200px] bg-secondary z-10", getTotalsCellClass())}>C</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[160px] bg-secondary z-10", getTotalsCellClass())}>D</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[120px] bg-secondary z-10", getTotalsCellClass())}>LM</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[80px] bg-secondary z-10", getTotalsCellClass())}>LAO</TableHead>
-                        <TableHead className={cn("border p-1 text-center font-semibold sticky right-[0px] bg-secondary z-10", getTotalsCellClass())}>Total</TableHead>
+                        {/* Removed other Totals Columns Headers, keeping only D for employee row which is now on the left */}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {employees.map(emp => (
                         <TableRow key={emp.id}>
                             <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap">{emp.name}</TableCell>
+                            <TableCell className={cn("sticky left-[120px] bg-background z-10 border p-1 text-center text-xs font-medium", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell> {/* Moved Total D data */}
+
                             {schedule.days.map(day => {
                             const currentShift = day.shifts[emp.id];
                             const selectValue = currentShift === null ? 'NULL' : currentShift;
@@ -892,58 +885,45 @@ export default function Home() {
                                 </TableCell>
                             );
                             })}
-                            {/* Employee Totals */}
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[440px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.workedDays ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[400px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.M ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[360px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.T ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[320px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSaturdays ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[280px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.freeSundays ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[240px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.F ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[200px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.C ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[160px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[120px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LM ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-medium sticky right-[80px] bg-background z-10", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.LAO ?? 0}</TableCell>
-                            <TableCell className={cn("border p-1 text-center text-xs font-semibold sticky right-[0px] bg-background z-10", getTotalsCellClass())}>
-                                { (schedule.employeeTotals[emp.id]?.workedDays ?? 0) +
-                                (schedule.employeeTotals[emp.id]?.F ?? 0) +
-                                (schedule.employeeTotals[emp.id]?.C ?? 0) +
-                                (schedule.employeeTotals[emp.id]?.D ?? 0) +
-                                (schedule.employeeTotals[emp.id]?.LM ?? 0) +
-                                (schedule.employeeTotals[emp.id]?.LAO ?? 0)
-                                }
-                            </TableCell>
+                            {/* Removed other Employee Totals cells */}
                         </TableRow>
                         ))}
                         {/* Daily Totals Rows */}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                         <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
-                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> Removed colspan */}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
-                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Descanso (TD)</TableCell>
+                             <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TD-${day.date}`} className="border p-1 text-center text-xs">{day.totals.D}</TableCell>)}
-                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Feriado (TF)</TableCell>
+                             <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TF-${day.date}`} className="border p-1 text-center text-xs">{day.totals.F}</TableCell>)}
-                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm">Total Compensat. (TC)</TableCell>
+                             <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TC-${day.date}`} className="border p-1 text-center text-xs">{day.totals.C}</TableCell>)}
-                            <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                           {/*  <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                         <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm">TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[120px] z-10 border p-1 text-sm", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
-                        <TableCell colSpan={11} className="sticky right-0 z-10 border p-1"></TableCell>
+                        {/* <TableCell colSpan={1} className="sticky right-0 z-10 border p-1"></TableCell> */}
                         </TableRow>
                     </TableBody>
                     </Table>

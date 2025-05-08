@@ -98,7 +98,7 @@ export default function Home() {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // Default to current month
   const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR); // Default to current year
 
-  const [employees, setEmployees] = useState<Employee[]>(defaultEmployees);
+  const [employees, setEmployees] = useState<Employee[]>(defaultEmployees.map(emp => ({...emp, preferences: emp.preferences || {}})));
   const [absences, setAbsences] = useState<Absence[]>(defaultAbsences);
   const [holidays, setHolidays] = useState<Holiday[]>(defaultHolidays);
   const [historyInputs, setHistoryInputs] = useState<{ [employeeId: number]: { [date: string]: ShiftType | null } }>({});
@@ -132,7 +132,7 @@ export default function Home() {
   // --- Data Management Functions ---
 
   const handleAddEmployee = (data: z.infer<typeof employeeSchema>) => {
-    setEmployees(prev => [...prev, { ...data, id: Date.now(), history: {} }]); // Simple ID generation
+    setEmployees(prev => [...prev, { ...data, id: Date.now(), history: {}, preferences: data.preferences || {} }]);
     setIsEmployeeDialogOpen(false);
     employeeForm.reset();
   };
@@ -147,7 +147,6 @@ export default function Home() {
 
   const handleDeleteEmployee = (id: number) => {
     setEmployees(prev => prev.filter(emp => emp.id !== id));
-    // Also remove related absences and history input
     setAbsences(prev => prev.filter(a => a.employeeId !== id));
     setHistoryInputs(prev => {
         const newHist = {...prev};
@@ -158,7 +157,6 @@ export default function Home() {
 
   const openEditEmployeeDialog = (employee: Employee) => {
       setEditingEmployee(employee);
-      // Make sure optional fields are initialized as arrays if they exist
       const prefs = employee.preferences || {};
       employeeForm.reset({
           name: employee.name,
@@ -169,7 +167,7 @@ export default function Home() {
               preferThursdayT: prefs.preferThursdayT ?? false,
               fixedAssignments: prefs.fixedAssignments ?? [],
               fixedDaysOff: prefs.fixedDaysOff ?? [],
-              fixedWorkShift: prefs.fixedWorkShift // Keep as potentially undefined
+              fixedWorkShift: prefs.fixedWorkShift
           }
       });
       setIsEmployeeDialogOpen(true);
@@ -247,7 +245,7 @@ export default function Home() {
   }, [selectedYear, selectedMonth]);
 
   const handleHistoryChange = (employeeId: number, date: string, value: string) => {
-      const shift = value === '-' ? null : value as ShiftType; // Treat placeholder value '-' as null
+      const shift = value === '-' ? null : value as ShiftType;
       setHistoryInputs(prev => ({
           ...prev,
           [employeeId]: {
@@ -262,18 +260,15 @@ export default function Home() {
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
-    setDisplayMode('viewing'); // Switch to viewing mode immediately
+    setDisplayMode('viewing');
 
-     // Prepare employee data with history
     const employeesWithHistory = employees.map(emp => ({
       ...emp,
       history: historyInputs[emp.id] || {},
-      // Reset consecutive days before generation
       consecutiveWorkDays: 0
     }));
 
 
-    // Basic validation before calling generator
      if (employeesWithHistory.length === 0) {
        setReport([{ rule: "Error de Entrada", passed: false, details: "No hay empleados definidos." }]);
        setIsLoading(false);
@@ -285,11 +280,8 @@ export default function Home() {
          return;
      }
 
-
-    // Simulate async generation for visual feedback
     setTimeout(() => {
       try {
-         // Pass deep copies to prevent mutation issues
         const result = generateSchedule(
           selectedYear,
           selectedMonth,
@@ -305,7 +297,7 @@ export default function Home() {
       } finally {
         setIsLoading(false);
       }
-    }, 50); // Short delay
+    }, 50);
   };
 
   // --- Manual Schedule Editing ---
@@ -313,19 +305,11 @@ export default function Home() {
         if (!schedule) return;
 
         const newShift = newShiftValue === 'NULL' ? null : newShiftValue as ShiftType;
-
-        // Create a deep copy of the schedule to modify
         const updatedSchedule: Schedule = JSON.parse(JSON.stringify(schedule));
-
-        // Find the day and update the shift
         const dayIndex = updatedSchedule.days.findIndex(d => d.date === date);
         if (dayIndex !== -1) {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
-
-            // Update the state without recalculating immediately
             setSchedule(updatedSchedule);
-
-            // Clear the report as it's now potentially invalid
             setReport([]);
         }
     };
@@ -333,21 +317,14 @@ export default function Home() {
     // --- Recalculate & Revalidate ---
     const handleRecalculate = () => {
         if (!schedule) return;
-        setIsLoading(true); // Show loading state for recalculation
+        setIsLoading(true);
         setReport([]);
-
-        // Create a deep copy to avoid direct state mutation before recalculation
          const scheduleToRecalculate = JSON.parse(JSON.stringify(schedule));
 
          setTimeout(() => {
              try {
-                // Recalculate totals for the *current* state of the schedule
                 calculateFinalTotals(scheduleToRecalculate, employees, absences);
-
-                // Re-validate the *current* state of the schedule
                 const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays);
-
-                // Update the state with recalculated totals and new report
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -356,9 +333,7 @@ export default function Home() {
             } finally {
                  setIsLoading(false);
             }
-         }, 50) // Short delay for visual feedback
-
-
+         }, 50)
     }
 
 
@@ -369,7 +344,7 @@ export default function Home() {
         const date = parseISO(day.date);
         if (!isValid(date)) throw new Error('Invalid date');
         const dayOfMonth = format(date, 'd');
-        const dayOfWeek = format(date, 'eee'); // Short day name (Mon, Tue, etc.)
+        const dayOfWeek = format(date, 'eee');
         return { dayOfMonth, dayOfWeek, isWeekend: day.isWeekend, isHoliday: day.isHoliday };
       } catch (e) {
         console.error(`Error parsing date: ${day.date}`, e);
@@ -379,7 +354,7 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (!shift) return "bg-background"; // Default background if null
+    if (!shift) return "bg-background";
     return SHIFT_COLORS[shift] || "bg-background";
   };
 
@@ -395,14 +370,12 @@ export default function Home() {
        return <XCircle className="text-red-600 h-5 w-5" />;
    };
 
-    // Days of week for fixedWorkShift preference
     const daysOfWeekOptions = [
         { value: 1, label: 'Lunes' }, { value: 2, label: 'Martes' }, { value: 3, label: 'Miércoles' },
         { value: 4, label: 'Jueves' }, { value: 5, label: 'Viernes' }, { value: 6, label: 'Sábado' },
         { value: 0, label: 'Domingo' }
     ];
 
-     // Options for the manual shift change select dropdown
      const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
 
 
@@ -415,7 +388,6 @@ export default function Home() {
                 <CardDescription>Configure los parámetros para la generación del horario.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                {/* Month/Year Selection and Generate Button */}
                 <div className="flex flex-col md:flex-row gap-4 items-end">
                     <div className="flex gap-4 w-full md:w-auto">
                         <div className="flex-1">
@@ -450,9 +422,7 @@ export default function Home() {
                     </Button>
                 </div>
 
-                    {/* Configuration Sections */}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        {/* Employees Section */}
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Empleados</CardTitle>
@@ -467,7 +437,6 @@ export default function Home() {
                                             <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
                                         </DialogHeader>
                                         <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
-                                            {/* Basic Info */}
                                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                                 <div>
                                                     <Label htmlFor="name">Nombre</Label>
@@ -490,7 +459,6 @@ export default function Home() {
                                                 </div>
                                             </div>
 
-                                            {/* Preferences */}
                                             <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
                                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                                                 <div className="flex items-center space-x-2">
@@ -507,7 +475,6 @@ export default function Home() {
                                                 </div>
                                             </div>
 
-                                            {/* Fixed Assignments */}
                                             <div className="space-y-2">
                                                 <Label>Asignaciones Fijas</Label>
                                                 {fixedAssignmentsFields.map((field, index) => (
@@ -534,13 +501,11 @@ export default function Home() {
                                                 <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
                                             </div>
 
-                                            {/* Fixed Days Off */}
                                             <div className="space-y-2">
                                                 <Label>Francos Fijos (YYYY-MM-DD)</Label>
                                                 {fixedDaysOffFields.map((field, index) => (
                                                     <div key={field.id} className="flex gap-2 items-center">
                                                         <Input type="date" {...employeeForm.register(`preferences.fixedDaysOff.${index}`)} placeholder="YYYY-MM-DD" className="flex-1"/>
-                                                        {/* Display potential error for this specific field */}
                                                         {employeeForm.formState.errors.preferences?.fixedDaysOff?.[index] && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedDaysOff[index]?.message}</p>}
                                                         <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedDayOff(index)}><Trash2 className="h-4 w-4"/></Button>
                                                     </div>
@@ -549,7 +514,6 @@ export default function Home() {
                                             </div>
 
 
-                                            {/* Fixed Work Shift */}
                                             <div className="space-y-2 border-t pt-4">
                                                 <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
                                                 <Controller
@@ -569,8 +533,7 @@ export default function Home() {
                                                                             const newDays = checked
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
-                                                                            // Ensure shift is defined if days are selected
-                                                                            const currentShift = field.value?.shift ?? 'M'; // Default to M if undefined
+                                                                            const currentShift = field.value?.shift ?? 'M';
                                                                             field.onChange({ dayOfWeek: newDays, shift: currentShift });
                                                                         }}
                                                                     />
@@ -581,8 +544,8 @@ export default function Home() {
                                                         <Label className="text-xs">Turno Fijo</Label>
                                                         <Select
                                                             value={field.value?.shift}
-                                                            onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })} // Ensure dayOfWeek is array
-                                                            disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0} // Disable if no days selected
+                                                            onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })}
+                                                            disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0}
                                                         >
                                                             <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
@@ -623,7 +586,6 @@ export default function Home() {
                                     ))}
                                     {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos.</p>}
                                 </ul>
-                                {/* History Input Section */}
                                 <div className="mt-4 space-y-4 border-t pt-4">
                                     <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
                                     {employees.map(emp => (
@@ -634,7 +596,7 @@ export default function Home() {
                                                     <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
                                                         <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
                                                         <Select
-                                                            value={historyInputs[emp.id]?.[dateStr] || '-'} // Use '-' as placeholder value
+                                                            value={historyInputs[emp.id]?.[dateStr] || '-'}
                                                             onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
                                                         >
                                                             <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
@@ -656,7 +618,6 @@ export default function Home() {
                             </CardContent>
                         </Card>
 
-                        {/* Absences Section */}
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
@@ -752,7 +713,6 @@ export default function Home() {
                             </CardContent>
                         </Card>
 
-                        {/* Holidays Section */}
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Feriados</CardTitle>
@@ -842,13 +802,13 @@ export default function Home() {
                     <TableHeader>
                         <TableRow className="bg-secondary">
                         <TableHead className="sticky left-0 bg-secondary z-10 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
-                        <TableHead className={cn("sticky left-[170px] bg-secondary z-10 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead> {/* Moved Total D header */}
+                        <TableHead className={cn("sticky left-[170px] bg-secondary z-10 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
 
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead
                             key={index}
                             className={cn(
-                                "border p-1 text-center text-xs font-semibold min-w-[70px] w-[70px]", // Increased min-width for select
+                                "border p-1 text-center text-xs font-semibold min-w-[70px] w-[70px]",
                                 isWeekend && "bg-muted text-muted-foreground",
                                 isHoliday && "bg-accent text-accent-foreground font-bold"
                             )}
@@ -857,14 +817,13 @@ export default function Home() {
                             <div>{dayOfWeek}</div>
                             </TableHead>
                         ))}
-                        {/* Removed other Totals Columns Headers, keeping only D for employee row which is now on the left */}
                         </TableRow>
                     </TableHeader>
                     <TableBody>
                         {employees.map(emp => (
                         <TableRow key={emp.id}>
                             <TableCell className="sticky left-0 bg-background z-10 border p-1 font-medium text-sm whitespace-nowrap min-w-[170px] w-[170px]">{emp.name}</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-background z-10 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell> {/* Moved Total D data */}
+                            <TableCell className={cn("sticky left-[170px] bg-background z-10 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
 
                             {schedule.days.map(day => {
                             const currentShift = day.shifts[emp.id];
@@ -872,7 +831,7 @@ export default function Home() {
                             return (
                                 <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-0 text-center text-xs font-medium min-w-[70px] w-[70px]", getShiftCellClass(currentShift))}>
                                 <Select
-                                        value={selectValue || undefined} // Handle undefined if selectValue is null
+                                        value={selectValue || undefined}
                                         onValueChange={(newValue) => handleManualShiftChange(emp.id, day.date, newValue)}
                                         >
                                     <SelectTrigger className={cn("w-full h-full text-xs border-0 rounded-none focus:ring-0 focus:ring-offset-0 px-1 py-0", getShiftCellClass(currentShift))} aria-label={`Shift for ${emp.name} on ${day.date}`}>
@@ -889,23 +848,21 @@ export default function Home() {
                                 </TableCell>
                             );
                             })}
-                            {/* Removed other Employee Totals cells */}
                         </TableRow>
                         ))}
-                        {/* Daily Totals Rows */}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                         <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
+                        <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
+                            <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell> {/* Empty cell for alignment */}
+                             <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>

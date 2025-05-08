@@ -125,25 +125,6 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
             });
         }
 
-         if (prefs.fixedDaysOff) {
-            prefs.fixedDaysOff.forEach(dateOff => {
-                 if (!dateOff) return;
-                 try {
-                    if (!isValid(parseISO(dateOff))) return;
-                     const dayIndex = schedule.days.findIndex(d => d.date === dateOff);
-                     if (dayIndex !== -1 && (schedule.days[dayIndex].shifts[employee.id] === null || !['LAO', 'LM'].includes(schedule.days[dayIndex].shifts[employee.id]!))) {
-                        if (!schedule.days[dayIndex].isHoliday) {
-                            schedule.days[dayIndex].shifts[employee.id] = 'D';
-                        } else {
-                            console.warn(`Cannot assign fixed 'D' to ${employee.name} on holiday ${dateOff}. Assigning 'F' instead.`);
-                            schedule.days[dayIndex].shifts[employee.id] = 'F';
-                        }
-                     }
-                 } catch (e) {
-                      console.warn(`Skipping invalid fixed day off date for ${employee.name}: ${dateOff}`)
-                 }
-            })
-         }
 
          if (prefs.fixedWorkShift) {
             const { dayOfWeek: daysOfWeek, shift } = prefs.fixedWorkShift;
@@ -270,16 +251,6 @@ function canWorkShift(employee: Employee, dateStr: string, shift: ShiftType | nu
             return false;
          }
      }
-     if (prefs.fixedDaysOff?.includes(dateStr) && (shift === 'M' || shift === 'T')) {
-           if(existingShift !== 'LAO' && existingShift !== 'LM'){
-              return false;
-           }
-      }
-      if (prefs.fixedDaysOff?.includes(dateStr) && shift !== 'D') {
-           if (!(shift === 'F' && day.isHoliday) && shift !== 'LAO' && shift !== 'LM') {
-               return false;
-           }
-      }
 
 
        if(prefs.fixedWorkShift){
@@ -501,17 +472,6 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                  prio1Passed = false;
             }
         });
-         emp.preferences?.fixedDaysOff?.forEach(fixedD => {
-             const day = schedule.days.find(d => d.date === fixedD);
-             if (day && day.shifts[emp.id] !== 'D' && !(day.shifts[emp.id] === 'F' && day.isHoliday) && day.shifts[emp.id] !== 'LAO' && day.shifts[emp.id] !== 'LM') {
-                  results.push({
-                     rule: `Prioridad 1 - Conflicto de Franco Fijo (${emp.name} en ${format(parseISO(fixedD), 'dd/MM')})`,
-                     passed: false,
-                     details: `Falló: Esperado D (preferencia definida), encontrado ${day.shifts[emp.id] ?? 'NULO'}`,
-                  });
-                  prio1Passed = false;
-             }
-         });
          const fixedW = emp.preferences?.fixedWorkShift;
           if(fixedW){
               const { dayOfWeek: daysOfWeek, shift: fixedShift } = fixedW;
@@ -840,7 +800,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
 
 
     employees.forEach(emp => {
-        if (emp.preferences?.preferWeekendWork || emp.preferences?.preferMondayRest || emp.preferences?.preferThursdayT) {
+        if (emp.preferences?.preferWeekendWork) {
             const prefs = emp.preferences;
             let violations: string[] = [];
             schedule.days.forEach(day => {
@@ -850,11 +810,8 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
 
                      const date = parseISO(day.date);
                      if (!isValid(date)) return;
-                     const dayOfWeek = getDay(date);
 
                      if (prefs.preferWeekendWork && (shift === 'D' || shift === 'C' || shift === 'F') && day.isWeekend) violations.push(`Franco/Libre en finde de trabajo preferido ${format(date, 'dd/MM')}`);
-                     if (prefs.preferMondayRest && (shift === 'M' || shift === 'T') && dayOfWeek === 1 && !day.isHoliday) violations.push(`Trabajó en lunes de descanso preferido ${format(date, 'dd/MM')}`);
-                     if (prefs.preferThursdayT && shift === 'M' && dayOfWeek === 4 && !day.isHoliday) violations.push(`Trabajó M en jueves de T preferido ${format(date, 'dd/MM')}`);
                 } catch (e) { /* Ignore date parsing issues */ }
             })
              if (violations.length > 0) {

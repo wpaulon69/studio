@@ -5,10 +5,7 @@ export interface Employee {
   eligibleWeekend: boolean; // Can this person have a full D/D weekend?
   preferences: { // Made non-optional for easier handling, ensure default empty object is provided
     preferWeekendWork?: boolean;
-    preferMondayRest?: boolean;
-    preferThursdayT?: boolean;
     fixedAssignments?: { date: string; shift: ShiftType }[]; // e.g., Cardozo 24/25 M, Molina 1 M
-    fixedDaysOff?: string[]; // e.g., Molina 17/18 D
     fixedWorkShift?: { dayOfWeek: number[]; shift: ShiftType }; // Alamo Mon-Fri M
   };
   history: { // Last 5 days of previous month
@@ -98,4 +95,3 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
 };
 
 export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd
-

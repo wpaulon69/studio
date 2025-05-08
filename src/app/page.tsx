@@ -54,10 +54,7 @@ const fixedAssignmentSchema = z.object({
 
 const employeePreferenceSchema = z.object({
     preferWeekendWork: z.boolean().optional(),
-    preferMondayRest: z.boolean().optional(),
-    preferThursdayT: z.boolean().optional(),
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
-    fixedDaysOff: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD")).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
         shift: z.enum(SHIFT_TYPES) // Keep original enum here
@@ -114,10 +111,9 @@ export default function Home() {
   // --- Form Hooks ---
     const employeeForm = useForm<z.infer<typeof employeeSchema>>({
         resolver: zodResolver(employeeSchema),
-        defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined } },
+        defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined } },
     });
     const { fields: fixedAssignmentsFields, append: appendFixedAssignment, remove: removeFixedAssignment } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedAssignments" });
-    const { fields: fixedDaysOffFields, append: appendFixedDayOff, remove: removeFixedDayOff } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedDaysOff" });
 
 
     const absenceForm = useForm<z.infer<typeof absenceSchema>>({
@@ -163,10 +159,7 @@ export default function Home() {
           eligibleWeekend: employee.eligibleWeekend,
           preferences: {
               preferWeekendWork: prefs.preferWeekendWork ?? false,
-              preferMondayRest: prefs.preferMondayRest ?? false,
-              preferThursdayT: prefs.preferThursdayT ?? false,
               fixedAssignments: prefs.fixedAssignments ?? [],
-              fixedDaysOff: prefs.fixedDaysOff ?? [],
               fixedWorkShift: prefs.fixedWorkShift
           }
       });
@@ -428,7 +421,7 @@ export default function Home() {
                                 <CardTitle className="text-lg font-medium">Empleados</CardTitle>
                                 <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
                                     <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined }}); }}>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); }}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                         </Button>
                                     </DialogTrigger>
@@ -465,14 +458,7 @@ export default function Home() {
                                                     <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
                                                     <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
                                                 </div>
-                                                <div className="flex items-center space-x-2">
-                                                    <Controller name="preferences.preferMondayRest" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefMonRest" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                                    <Label htmlFor="prefMonRest">Prefiere Lunes Franco</Label>
-                                                </div>
-                                                <div className="flex items-center space-x-2">
-                                                    <Controller name="preferences.preferThursdayT" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefThuT" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                                    <Label htmlFor="prefThuT">Prefiere Jueves Turno T</Label>
-                                                </div>
+
                                             </div>
 
                                             <div className="space-y-2">
@@ -499,18 +485,6 @@ export default function Home() {
                                                 {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
 
                                                 <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <Label>Francos Fijos (YYYY-MM-DD)</Label>
-                                                {fixedDaysOffFields.map((field, index) => (
-                                                    <div key={field.id} className="flex gap-2 items-center">
-                                                        <Input type="date" {...employeeForm.register(`preferences.fixedDaysOff.${index}`)} placeholder="YYYY-MM-DD" className="flex-1"/>
-                                                        {employeeForm.formState.errors.preferences?.fixedDaysOff?.[index] && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedDaysOff[index]?.message}</p>}
-                                                        <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedDayOff(index)}><Trash2 className="h-4 w-4"/></Button>
-                                                    </div>
-                                                ))}
-                                                <Button type="button" variant="outline" size="sm" onClick={() => appendFixedDayOff('')}>+ Franco</Button>
                                             </div>
 
 

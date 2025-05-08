@@ -25,11 +25,11 @@ import * as z from 'zod';
 // --- Initial Data (Now defaults, user can modify) ---
 const defaultEmployees: Employee[] = [
     { id: 1, name: 'Rios', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {} }, // Removed fixed assignments and days off
+    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: {}, history: {} },
     { id: 3, name: 'Montu', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: {}, history: {} }, // Removed fixed assignments
+    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: {}, history: {} },
     { id: 5, name: 'Garavaglia', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 6, name: 'Forni', eligibleWeekend: true, preferences: { preferWeekendWork: true, preferMondayRest: true, preferThursdayT: true }, history: {} },
+    { id: 6, name: 'Forni', eligibleWeekend: true, preferences: {}, history: {} },
     { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {} }
 ];
 
@@ -114,7 +114,7 @@ export default function Home() {
   // --- Form Hooks ---
     const employeeForm = useForm<z.infer<typeof employeeSchema>>({
         resolver: zodResolver(employeeSchema),
-        defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], fixedWorkShift: undefined } },
+        defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], fixedDaysOff: [], preferWeekendWork: false, preferMondayRest: false, preferThursdayT: false, fixedWorkShift: undefined } },
     });
     const { fields: fixedAssignmentsFields, append: appendFixedAssignment, remove: removeFixedAssignment } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedAssignments" });
     const { fields: fixedDaysOffFields, append: appendFixedDayOff, remove: removeFixedDayOff } = useFieldArray({ control: employeeForm.control, name: "preferences.fixedDaysOff" });
@@ -275,12 +275,12 @@ export default function Home() {
 
     // Basic validation before calling generator
      if (employeesWithHistory.length === 0) {
-       setReport([{ rule: "Input Error", passed: false, details: "No hay empleados definidos." }]);
+       setReport([{ rule: "Error de Entrada", passed: false, details: "No hay empleados definidos." }]);
        setIsLoading(false);
        return;
      }
      if (isNaN(selectedYear) || isNaN(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
-         setReport([{ rule: "Input Error", passed: false, details: "Mes o año inválido." }]);
+         setReport([{ rule: "Error de Entrada", passed: false, details: "Mes o año inválido." }]);
          setIsLoading(false);
          return;
      }
@@ -301,7 +301,7 @@ export default function Home() {
         setReport(result.report);
       } catch (error) {
         console.error("Error generating schedule:", error);
-        setReport([{rule: "Generation Error", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Unknown error'}`}]);
+        setReport([{rule: "Error de Generación", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`}]);
       } finally {
         setIsLoading(false);
       }
@@ -342,7 +342,7 @@ export default function Home() {
          setTimeout(() => {
              try {
                 // Recalculate totals for the *current* state of the schedule
-                calculateFinalTotals(scheduleToRecalculate, employees);
+                calculateFinalTotals(scheduleToRecalculate, employees, absences);
 
                 // Re-validate the *current* state of the schedule
                 const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays);
@@ -352,7 +352,7 @@ export default function Home() {
                 setReport(newReport);
             } catch (error) {
                 console.error("Error during recalculation:", error);
-                setReport([{rule: "Recalculation Error", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Unknown error'}`}]);
+                setReport([{rule: "Error de Recálculo", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`}]);
             } finally {
                  setIsLoading(false);
             }
@@ -387,8 +387,11 @@ export default function Home() {
        return TOTALS_COLOR;
    }
 
-   const getValidationIcon = (passed: boolean) => {
+   const getValidationIcon = (passed: boolean, rule: string) => {
        if (passed) return <CheckCircle className="text-green-600 h-5 w-5" />;
+       if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial") || rule.startsWith("Generator Info")) {
+            return <Info className="text-yellow-600 h-5 w-5" />;
+       }
        return <XCircle className="text-red-600 h-5 w-5" />;
    };
 
@@ -869,7 +872,7 @@ export default function Home() {
                             return (
                                 <TableCell key={`${emp.id}-${day.date}`} className={cn("border p-0 text-center text-xs font-medium min-w-[70px] w-[70px]", getShiftCellClass(currentShift))}>
                                 <Select
-                                        value={selectValue}
+                                        value={selectValue || undefined} // Handle undefined if selectValue is null
                                         onValueChange={(newValue) => handleManualShiftChange(emp.id, day.date, newValue)}
                                         >
                                     <SelectTrigger className={cn("w-full h-full text-xs border-0 rounded-none focus:ring-0 focus:ring-offset-0 px-1 py-0", getShiftCellClass(currentShift))} aria-label={`Shift for ${emp.name} on ${day.date}`}>
@@ -920,15 +923,14 @@ export default function Home() {
                 <CardContent>
                     <div className="space-y-3">
                     {report.map((item, index) => (
-                        <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? "border-yellow-300" : "border-red-200") )}>
+                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") ? "border-yellow-300" : "border-red-200") )}>
                             <div className="flex items-start space-x-3">
-                            {item.passed ? <CheckCircle className="text-green-500 h-5 w-5 mt-1"/> : (item.rule.startsWith("Flexible") || item.rule.startsWith("Potential") || item.rule.startsWith("Generator Info") ? <Info className="text-yellow-500 h-5 w-5 mt-1"/> : <XCircle className="text-red-500 h-5 w-5 mt-1"/>)}
+                            {getValidationIcon(item.passed, item.rule)}
                             <div>
                                 <AlertTitle className="font-semibold">{item.rule}</AlertTitle>
                                 {item.details && <AlertDescription className="text-sm">{item.details}</AlertDescription>}
                             </div>
                             </div>
-
                         </Alert>
                     ))}
                     </div>
@@ -940,8 +942,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-
-
-    

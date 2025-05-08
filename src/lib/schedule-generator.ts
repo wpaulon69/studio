@@ -83,7 +83,7 @@ function applyAbsences(schedule: Schedule, absences: Absence[], employees: Emplo
   const employeeMap = new Map(employees.map(e => [e.id, e]));
   absences.forEach(absence => {
     const employee = employeeMap.get(absence.employeeId);
-    if (!employee || !absence.startDate || !absence.endDate) return; // Skip if employee not found or dates invalid
+    if (!employee || !absence.startDate || !absence.endDate) return;
 
     try {
         const startDate = parseISO(absence.startDate);
@@ -93,14 +93,10 @@ function applyAbsences(schedule: Schedule, absences: Absence[], employees: Emplo
              return;
         }
 
-
         schedule.days.forEach(day => {
           const currentDate = parseISO(day.date);
           if (currentDate >= startDate && currentDate <= endDate) {
-            // Do not overwrite if already set (e.g., another absence overlapping?) - Overwrite is usually fine if this is Prio 1
-            // if (day.shifts[absence.employeeId] === null) {
                  day.shifts[absence.employeeId] = absence.type;
-            // }
           }
         });
     } catch (e) {
@@ -111,17 +107,14 @@ function applyAbsences(schedule: Schedule, absences: Absence[], employees: Emplo
 
 function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
     employees.forEach(employee => {
-        // Preferences might be undefined if not set in UI, default to empty object
         const prefs = employee.preferences || {};
 
-        // Apply Fixed Assignments (M/T/D/C/F etc on specific dates)
         if (prefs.fixedAssignments) {
             prefs.fixedAssignments.forEach(assignment => {
-                 if (!assignment.date || !assignment.shift) return; // Skip incomplete fixed assignments
+                 if (!assignment.date || !assignment.shift) return;
                  try {
-                    if (!isValid(parseISO(assignment.date))) return; // Skip invalid date format
+                    if (!isValid(parseISO(assignment.date))) return;
                     const dayIndex = schedule.days.findIndex(d => d.date === assignment.date);
-                    // Assign if slot is empty OR if the existing assignment is NOT LAO/LM (fixed assignments override generated D/C/F)
                     if (dayIndex !== -1 && (schedule.days[dayIndex].shifts[employee.id] === null || !['LAO', 'LM'].includes(schedule.days[dayIndex].shifts[employee.id]!))) {
                        schedule.days[dayIndex].shifts[employee.id] = assignment.shift;
                     }
@@ -131,21 +124,17 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
             });
         }
 
-        // Apply Fixed Days Off (Specific dates where employee MUST have 'D')
          if (prefs.fixedDaysOff) {
             prefs.fixedDaysOff.forEach(dateOff => {
-                 if (!dateOff) return; // Skip empty fixed days off
+                 if (!dateOff) return;
                  try {
-                    if (!isValid(parseISO(dateOff))) return; // Skip invalid date format
+                    if (!isValid(parseISO(dateOff))) return;
                      const dayIndex = schedule.days.findIndex(d => d.date === dateOff);
-                     // Assign D if slot is empty OR if the existing assignment is NOT LAO/LM
                      if (dayIndex !== -1 && (schedule.days[dayIndex].shifts[employee.id] === null || !['LAO', 'LM'].includes(schedule.days[dayIndex].shifts[employee.id]!))) {
-                         // Check if it's a holiday - Prio 3 forbids D on Holiday
                         if (!schedule.days[dayIndex].isHoliday) {
                             schedule.days[dayIndex].shifts[employee.id] = 'D';
                         } else {
                             console.warn(`Cannot assign fixed 'D' to ${employee.name} on holiday ${dateOff}. Assigning 'F' instead.`);
-                            // Assign 'F' if 'D' is requested on a holiday
                             schedule.days[dayIndex].shifts[employee.id] = 'F';
                         }
                      }
@@ -155,16 +144,13 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
             })
          }
 
-        // Apply Fixed Work Shift (e.g., Alamo works M on Weekdays)
          if (prefs.fixedWorkShift) {
             const { dayOfWeek: daysOfWeek, shift } = prefs.fixedWorkShift;
-            // Ensure daysOfWeek is an array before proceeding
             if(Array.isArray(daysOfWeek) && shift) {
                 schedule.days.forEach(day => {
-                    // Assign fixed shift only if the slot is currently empty (respecting LAO/LM)
-                     if (day.shifts[employee.id] === null) {
+                     if (day.shifts[employee.id] === null) { // Only apply if not already set by absence or other fixed assignment
                          const currentDate = parseISO(day.date);
-                         const currentDayOfWeek = getDay(currentDate); // Sunday = 0, Saturday = 6
+                         const currentDayOfWeek = getDay(currentDate); // 0 (Sunday) to 6 (Saturday)
                          if (daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday) {
                              day.shifts[employee.id] = shift;
                          }
@@ -176,7 +162,6 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
 }
 
 
-// Calculates consecutive work days *ending* on the day *before* dateStr
 function getConsecutiveWorkDaysBefore(employeeId: number, dateStr: string, schedule: Schedule, employees: Employee[]): number {
     const employee = employees.find(e => e.id === employeeId);
     if (!employee) return 0;
@@ -184,14 +169,12 @@ function getConsecutiveWorkDaysBefore(employeeId: number, dateStr: string, sched
     let consecutiveDays = 0;
     let currentDate: Date;
      try {
-       currentDate = subDays(parseISO(dateStr), 1); // Start checking from the day before
-       if (!isValid(currentDate)) return 0; // Invalid input date
+       currentDate = subDays(parseISO(dateStr), 1);
+       if (!isValid(currentDate)) return 0;
      } catch (e) {
-        return 0; // Error parsing input date
+        return 0;
      }
 
-
-    // Check current schedule backwards
     const scheduleStartDate = parseISO(schedule.days[0].date);
     while (currentDate >= scheduleStartDate) {
         const currentDayStr = format(currentDate, 'yyyy-MM-dd');
@@ -201,34 +184,32 @@ function getConsecutiveWorkDaysBefore(employeeId: number, dateStr: string, sched
         if (shift === 'M' || shift === 'T') {
             consecutiveDays++;
         } else {
-            // Any non-work shift (D, C, F, LAO, LM, or null initially) breaks the streak
             return consecutiveDays;
         }
         currentDate = subDays(currentDate, 1);
     }
 
-    // If we reach the beginning of the schedule, check history
     const history = employee.history || {};
-    const historyDates = Object.keys(history).sort().reverse(); // Sort recent first
+    const historyDates = Object.keys(history).sort().reverse();
 
     for(const histDateStr of historyDates){
          try {
              const histDate = parseISO(histDateStr);
-              if (!isValid(histDate)) continue; // Skip invalid history dates
+              if (!isValid(histDate)) continue;
 
               if(format(currentDate, 'yyyy-MM-dd') !== histDateStr) {
-                  return consecutiveDays;
+                  return consecutiveDays; // History is not contiguous with current loop
               };
              const shift = history[histDateStr];
               if (shift === 'M' || shift === 'T') {
                  consecutiveDays++;
-                 currentDate = subDays(currentDate, 1); // Move to the next day to check in history
+                 currentDate = subDays(currentDate, 1);
              } else {
                  return consecutiveDays;
              }
          } catch (e) {
               console.warn(`Error parsing history date ${histDateStr} for employee ${employee.name}. Skipping.`);
-              return consecutiveDays; // Stop checking history on error
+              return consecutiveDays; // Return what we have if history is malformed
          }
     }
     return consecutiveDays;
@@ -237,68 +218,80 @@ function getConsecutiveWorkDaysBefore(employeeId: number, dateStr: string, sched
 
 function canWorkShift(employee: Employee, dateStr: string, shift: ShiftType | null, schedule: Schedule, employees: Employee[]): boolean {
     const day = schedule.days.find(d => d.date === dateStr);
-    if (!day) return false; // Day not found
+    if (!day) return false;
 
-    // Allow assignment if shift is null (clearing)
-    if(shift === null) return true;
+    if(shift === null) return true; // Can always "unassign"
 
-     // Cannot assign if already LAO or LM (highest priority), unless trying to assign the same LAO/LM again (idempotent)
+     // Check if already on LAO/LM
      const existingShift = day.shifts[employee.id];
      if ((existingShift === 'LAO' || existingShift === 'LM') && existingShift !== shift) {
-         return false;
+         return false; // Cannot overwrite LAO/LM with a work shift
      }
 
-
-    // Prio 5: Max Consecutive Days
+    // Rule 1: Max consecutive work days
     if ((shift === 'M' || shift === 'T')) {
         const consecutiveBefore = getConsecutiveWorkDaysBefore(employee.id, dateStr, schedule, employees);
         if (consecutiveBefore >= MAX_CONSECUTIVE_WORK_DAYS) {
+            //  console.log(`Blocked ${employee.name} on ${dateStr} for ${shift}: consecutive days limit (${consecutiveBefore} >= ${MAX_CONSECUTIVE_WORK_DAYS})`);
              return false;
         }
     }
 
-    // Prio 3: Cannot assign 'D' on a holiday
+    // Rule 2: Cannot assign 'D' on a holiday
     if (shift === 'D' && day.isHoliday) {
+        // console.log(`Blocked ${employee.name} on ${dateStr} for D: is a holiday`);
         return false;
     }
 
 
+    // Rule 3: Fixed Assignments/Days Off/Work Shifts from preferences
     const prefs = employee.preferences || {};
+    // If there's a fixed assignment for this day and it's different from the proposed shift
     if (prefs.fixedAssignments?.some(a => a.date === dateStr && a.shift !== shift)) {
-         if(existingShift !== 'LAO' && existingShift !== 'LM'){
-            return false; 
+         if(existingShift !== 'LAO' && existingShift !== 'LM'){ // Allow if current is LAO/LM and we are trying to assign LAO/LM again
+            // console.log(`Blocked ${employee.name} on ${dateStr} for ${shift}: fixed assignment conflict`);
+            return false;
          }
      }
+     // If this day is a fixed day off and the proposed shift is a work shift
      if (prefs.fixedDaysOff?.includes(dateStr) && (shift === 'M' || shift === 'T')) {
            if(existingShift !== 'LAO' && existingShift !== 'LM'){
-              return false; 
+            //    console.log(`Blocked ${employee.name} on ${dateStr} for ${shift}: fixed day off conflict`);
+              return false;
            }
       }
+      // If this day is a fixed day off, but the shift is not D (and not F on a holiday)
       if (prefs.fixedDaysOff?.includes(dateStr) && shift !== 'D') {
-           if (!(shift === 'F' && day.isHoliday) && shift !== 'LAO' && shift !== 'LM') {
+           if (!(shift === 'F' && day.isHoliday) && shift !== 'LAO' && shift !== 'LM') { // Allow F on holiday, or if LAO/LM
+            //    console.log(`Blocked ${employee.name} on ${dateStr} for ${shift}: fixed day off conflict (not D/F)`);
                return false;
            }
       }
 
+
        if(prefs.fixedWorkShift){
-         const { dayOfWeek: daysOfWeek, shift: fixedShift } = prefs.fixedWorkShift;
-         if(Array.isArray(daysOfWeek) && fixedShift) {
+         const { dayOfWeek: daysOfWeek, shift: fixedShiftValue } = prefs.fixedWorkShift;
+         if(Array.isArray(daysOfWeek) && fixedShiftValue) {
              const currentDayOfWeek = getDay(parseISO(dateStr));
              const requiresFixedShift = daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday;
 
-             if(requiresFixedShift && shift !== fixedShift){
+             // If this day requires a specific fixed shift, and the proposed shift is different
+             if(requiresFixedShift && shift !== fixedShiftValue){
                  if(existingShift !== 'LAO' && existingShift !== 'LM'){
-                     return false;
+                    // console.log(`Blocked ${employee.name} on ${dateStr} for ${shift}: fixed weekly shift conflict`);
+                    return false;
                  }
              }
-             if(!requiresFixedShift && (shift === 'M' || shift === 'T') && !day.isHoliday){
-                 if(existingShift !== 'LAO' && existingShift !== 'LM'){
-                      return false;
-                 }
-             }
+             // If this day *doesn't* require a fixed shift (i.e., it's not one of the specified daysOfWeek or it's a holiday),
+             // but the employee has a fixed work shift defined (implying other days they might be off, especially if not eligibleWeekend)
+             // This part is tricky: does fixedWorkShift imply they *cannot* work other days?
+             // For someone like Alamo (not eligibleWeekend, fixed M-F 'M'), this implies Sat/Sun should be off.
+             // For now, this only enforces the *positive* assignment. Negative (cannot work other days) is handled by lack of availability or D/C assignment.
          }
        }
 
+
+    // Rule 4: No T followed immediately by M
     if (shift === 'M') {
         const prevDate = subDays(parseISO(dateStr), 1);
         const prevDateStr = format(prevDate, 'yyyy-MM-dd');
@@ -308,17 +301,21 @@ function canWorkShift(employee: Employee, dateStr: string, shift: ShiftType | nu
         if (prevDaySchedule) {
             prevShift = prevDaySchedule.shifts[employee.id];
         } else {
+            // Check history for the day before the schedule starts
              prevShift = employee.history?.[prevDateStr] || null;
         }
 
         if (prevShift === 'T') {
-            // Validation should handle reporting.
+            // console.log(`Blocked ${employee.name} on ${dateStr} for M: previous day was T`);
+            // This is a flexible rule, so for now, canWorkShift will allow it, and validation will report it.
+            // If it needs to be a hard block: return false;
         }
     }
+
     return true;
 }
 
-// --- Global Employee Data (needed for stateful updates within generation scope) ---
+// Global variable to hold current employees state for assignShift and canWorkShift
 let currentEmployeesState: Employee[] = [];
 
 function assignShift(employeeId: number, dateStr: string, shift: ShiftType | null, schedule: Schedule) {
@@ -327,29 +324,41 @@ function assignShift(employeeId: number, dateStr: string, shift: ShiftType | nul
 
   const currentShift = day.shifts[employeeId];
 
+  // Allow assignment if:
+  // 1. Current slot is null OR
+  // 2. Proposed shift is null (clearing a shift) OR
+  // 3. Current slot is not LAO/LM (to prevent overwriting fixed absences with generated shifts)
   if (currentShift === null || shift === null || (currentShift !== 'LAO' && currentShift !== 'LM')) {
       const employee = currentEmployeesState.find(e => e.id === employeeId);
       if (employee && canWorkShift(employee, dateStr, shift, schedule, currentEmployeesState)) {
            day.shifts[employeeId] = shift;
       } else {
-           console.warn(`Generator prevented invalid assignment: ${shift} for Emp ${employeeId} on ${dateStr}. Current: ${currentShift}`);
+          // console.warn(`CANNOT ASSIGN: ${employee?.name} on ${dateStr} for ${shift} due to canWorkShift rules.`);
       }
   } else if(currentShift === 'LAO' || currentShift === 'LM') {
-       if(shift !== currentShift) { 
-           console.warn(`Assignment blocked: Cannot overwrite ${currentShift} with ${shift} for employee ${employeeId} on ${dateStr}.`);
+       // If current is LAO/LM, only allow overwriting if the new shift is the SAME LAO/LM (idempotent)
+       // Or if the new shift is null (manual clearing)
+       if(shift !== currentShift && shift !== null) {
+           // console.warn(`Assignment blocked: Cannot overwrite ${currentShift} with ${shift} for employee ${employeeId} on ${dateStr}.`);
+       } else if (shift === null) {
+           day.shifts[employeeId] = null; // Allow manual clearing of LAO/LM
        }
   }
 }
 
 
-export function calculateFinalTotals(schedule: Schedule, employees: Employee[]) {
+export function calculateFinalTotals(schedule: Schedule, employees: Employee[], absences?: Absence[]) {
+  // Reset daily totals
   schedule.days.forEach(day => {
     day.totals = { M: 0, T: 0, D: 0, C: 0, F: 0, LM: 0, LAO: 0, TPT: 0 };
   });
+  // Reset employee totals
    employees.forEach(emp => {
         if (!schedule.employeeTotals[emp.id]) {
+            // This case should ideally not happen if initialized correctly
              schedule.employeeTotals[emp.id] = { workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, C: 0, D: 0, LM: 0, LAO: 0 };
         } else {
+            // Reset all counters to 0
              Object.keys(schedule.employeeTotals[emp.id]).forEach(key => {
                   (schedule.employeeTotals[emp.id] as any)[key] = 0;
              });
@@ -366,21 +375,21 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[]) 
         if (!isValid(date)) throw new Error('Invalid date');
     } catch (e) {
         console.error(`Error parsing date for totals calculation: ${day.date}`);
-        return; 
+        return; // Skip this day if date is invalid
     }
 
-    const dayOfWeek = getDay(date); 
+    const dayOfWeek = getDay(date); // 0 (Sunday) to 6 (Saturday)
 
     Object.entries(day.shifts).forEach(([empIdStr, shift]) => {
         const empId = parseInt(empIdStr);
-        const empTotals = schedule.employeeTotals[empId];
+        const empTotals = schedule.employeeTotals[empId]; // Should exist due to reset above
         if (!empTotals) {
-            console.warn(`Employee totals not found for ID ${empId} during final calculation. Initializing.`);
-            schedule.employeeTotals[empId] = { workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, C: 0, D: 0, LM: 0, LAO: 0 }; 
+            console.warn(`Employee totals not found for ID ${empId} during final calculation. This is unexpected after initialization/reset.`);
+            return; // Skip if somehow empTotals is still undefined
         }
-         const currentEmpTotals = schedule.employeeTotals[empId];
+         const currentEmpTotals = schedule.employeeTotals[empId]; // Alias for clarity
 
-
+        // Increment daily totals and employee-specific totals
         if (shift === 'M') { day.totals.M++; currentEmpTotals.M++; currentEmpTotals.workedDays++; }
         else if (shift === 'T') { day.totals.T++; currentEmpTotals.T++; currentEmpTotals.workedDays++; }
         else if (shift === 'D') { day.totals.D++; currentEmpTotals.D++; }
@@ -389,22 +398,41 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[]) 
         else if (shift === 'LM') { day.totals.LM++; currentEmpTotals.LM++; }
         else if (shift === 'LAO') { day.totals.LAO++; currentEmpTotals.LAO++; }
 
-         if (dayOfWeek === 6 && shift !== 'M' && shift !== 'T') currentEmpTotals.freeSaturdays++;
-         if (dayOfWeek === 0 && shift !== 'M' && shift !== 'T') currentEmpTotals.freeSundays++;
+        // Track free weekends based on any non-working shift
+         if (dayOfWeek === 6 && shift !== 'M' && shift !== 'T') currentEmpTotals.freeSaturdays++; // Saturday is 6
+         if (dayOfWeek === 0 && shift !== 'M' && shift !== 'T') currentEmpTotals.freeSundays++; // Sunday is 0
 
     });
+    // Calculate TPT for the day
      day.totals.TPT = day.totals.M + day.totals.T;
   });
 
+    // Sanity check: Ensure each employee has an assignment for every day of the month, unless on full month leave
     employees.forEach(emp => {
          const totals = schedule.employeeTotals[emp.id];
          if (!totals) {
              console.warn(`Totals missing for employee ${emp.name} (${emp.id}) during final verification.`);
              return;
          }
-         const totalAssigned = totals.workedDays + totals.C + totals.D + totals.F + totals.LM + totals.LAO;
-         if(totalAssigned !== numDaysInMonth){
-            console.warn(`ALERT: Employee ${emp.name} (${emp.id}) total days mismatch. Assigned: ${totalAssigned}, Month Days: ${numDaysInMonth}. (May indicate unassigned/edited days)`);
+         const totalAssignedShiftsOrAbsences = totals.workedDays + totals.C + totals.D + totals.F + totals.LM + totals.LAO;
+
+         if(totalAssignedShiftsOrAbsences !== numDaysInMonth){
+             // Check if the employee is on leave for the entire month
+             const isOnLeaveFullMonth = absences?.some(a => {
+                 if (a.employeeId !== emp.id || !a.startDate || !a.endDate) return false;
+                 try {
+                     const absenceStart = parseISO(a.startDate);
+                     const absenceEnd = parseISO(a.endDate);
+                     const monthStart = startOfMonth(new Date(schedule.year, schedule.month - 1));
+                     const monthEnd = endOfMonth(new Date(schedule.year, schedule.month - 1));
+                     return isValid(absenceStart) && isValid(absenceEnd) &&
+                            absenceStart <= monthStart && absenceEnd >= monthEnd;
+                 } catch (e) { return false; }
+             });
+
+             if (!isOnLeaveFullMonth) {
+                console.warn(`ALERTA: Empleado ${emp.name} (${emp.id}) desajuste de días totales. Asignados: ${totalAssignedShiftsOrAbsences}, Días del Mes: ${numDaysInMonth}`);
+             }
          }
     });
 }
@@ -414,9 +442,8 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
   const results: ValidationResult[] = [];
   const employeeMap = new Map(employees.map(e => [e.id, e]));
 
-  // --- Priority Rules ---
-
-  // Prio 1: Absences & Fixed Assignments
+  // Prio 1: Absences & Fixed Assignments (Implicitly checked by application, but verify)
+  // Example: Verify LAO/LM are still set correctly
   let prio1Passed = true;
    absences.forEach(absence => {
         const employee = employeeMap.get(absence.employeeId);
@@ -431,40 +458,43 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                if (currentDate >= startDate && currentDate <= endDate) {
                    if (day.shifts[absence.employeeId] !== absence.type) {
                        results.push({
-                           rule: `Priority 1 - Absence Conflict (${employee.name} on ${day.date})`,
+                           rule: `Prioridad 1 - Conflicto de Ausencia (${employee.name} en ${format(parseISO(day.date), 'dd/MM')})`,
                            passed: false,
-                           details: `Failed: Expected ${absence.type} (defined absence), found ${day.shifts[absence.employeeId]}`,
+                           details: `Falló: Esperado ${absence.type} (ausencia definida), encontrado ${day.shifts[absence.employeeId] ?? 'NULO'}`,
                        });
                        prio1Passed = false;
                    }
                }
            });
-        } catch (e) { /* ignore date parsing errors here, handled elsewhere */ }
+        } catch (e) { /* ignore */ }
    });
     employees.forEach(emp => {
         emp.preferences?.fixedAssignments?.forEach(fixed => {
             const day = schedule.days.find(d => d.date === fixed.date);
+            // Check if the assigned shift is different, AND it's not an overriding LAO/LM
             if (day && day.shifts[emp.id] !== fixed.shift && day.shifts[emp.id] !== 'LAO' && day.shifts[emp.id] !== 'LM') {
                  results.push({
-                    rule: `Priority 1 - Fixed Assignment Conflict (${emp.name} on ${fixed.date})`,
+                    rule: `Prioridad 1 - Conflicto de Asignación Fija (${emp.name} en ${format(parseISO(fixed.date), 'dd/MM')})`,
                     passed: false,
-                    details: `Failed: Expected ${fixed.shift} (defined preference), found ${day.shifts[emp.id]}`,
+                    details: `Falló: Esperado ${fixed.shift} (preferencia definida), encontrado ${day.shifts[emp.id] ?? 'NULO'}`,
                  });
                  prio1Passed = false;
             }
         });
          emp.preferences?.fixedDaysOff?.forEach(fixedD => {
              const day = schedule.days.find(d => d.date === fixedD);
+             // Check if not D, and not F on holiday, and not LAO/LM
              if (day && day.shifts[emp.id] !== 'D' && !(day.shifts[emp.id] === 'F' && day.isHoliday) && day.shifts[emp.id] !== 'LAO' && day.shifts[emp.id] !== 'LM') {
                   results.push({
-                     rule: `Priority 1 - Fixed Day Off Conflict (${emp.name} on ${fixedD})`,
+                     rule: `Prioridad 1 - Conflicto de Franco Fijo (${emp.name} en ${format(parseISO(fixedD), 'dd/MM')})`,
                      passed: false,
-                     details: `Failed: Expected D (defined preference), found ${day.shifts[emp.id]}`,
+                     details: `Falló: Esperado D (preferencia definida), encontrado ${day.shifts[emp.id] ?? 'NULO'}`,
                   });
                   prio1Passed = false;
              }
          });
-         const fixedW = emp.preferences?.fixedWorkShift; 
+         // Check fixed weekly schedule
+         const fixedW = emp.preferences?.fixedWorkShift;
           if(fixedW){
               const { dayOfWeek: daysOfWeek, shift: fixedShift } = fixedW;
               if(Array.isArray(daysOfWeek) && fixedShift){
@@ -473,19 +503,22 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                        const requiresFixedShift = daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday;
                        const actualShift = day.shifts[emp.id];
 
+                        // If it's a day for fixed shift, but actual is different (and not LAO/LM)
                         if(requiresFixedShift && actualShift !== fixedShift && actualShift !== 'LAO' && actualShift !== 'LM'){
                            results.push({
-                              rule: `Priority 1 - Fixed Weekly Shift Conflict (${emp.name} on ${day.date})`,
+                              rule: `Prioridad 1 - Conflicto Turno Semanal Fijo (${emp.name} en ${format(parseISO(day.date), 'dd/MM')})`,
                               passed: false,
-                              details: `Failed: Expected ${fixedShift} (defined preference), found ${actualShift}`,
+                              details: `Falló: Esperado ${fixedShift} (preferencia), encontrado ${actualShift ?? 'NULO'}`,
                            });
                            prio1Passed = false;
                         }
-                         if(!requiresFixedShift && (actualShift === 'M' || actualShift === 'T') && !day.isHoliday && actualShift !== 'LAO' && actualShift !== 'LM'){
+                        // If it's NOT a day for fixed shift, but employee is working (M/T), and they are not eligible for weekend (e.g. Alamo)
+                        // This implies they should only work their fixed schedule.
+                         if(!requiresFixedShift && (actualShift === 'M' || actualShift === 'T') && !day.isHoliday && actualShift !== 'LAO' && actualShift !== 'LM' && emp.eligibleWeekend === false){
                              results.push({
-                                rule: `Priority 1 - Fixed Weekly Shift Conflict (${emp.name} on ${day.date})`,
+                                rule: `Prioridad 1 - Conflicto Turno Semanal Fijo (${emp.name} en ${format(parseISO(day.date), 'dd/MM')})`,
                                 passed: false,
-                                details: `Failed: Should not work M/T on this day (defined preference), found ${actualShift}`,
+                                details: `Falló: No debería trabajar M/T este día (preferencia de turno fijo), encontrado ${actualShift ?? 'NULO'}`,
                              });
                              prio1Passed = false;
                          }
@@ -495,10 +528,11 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
     });
 
    if (prio1Passed) {
-       results.push({ rule: `Priority 1 - Absences/Fixed (Overall)`, passed: true, details: 'Passed'});
+       results.push({ rule: `Prioridad 1 - Ausencias/Fijos (General)`, passed: true, details: 'Pasó'});
    }
 
-  // Prio 2: Coverage & M/T Ratio
+
+  // Prio 2: Min coverage & M/T ratio on workdays
    let prio2Passed = true;
    schedule.days.forEach(day => {
      const { M, T, TPT } = day.totals;
@@ -517,30 +551,32 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
           dayPassed = false;
          details.push(`T=${T} (<${MIN_COVERAGE_T})`);
      }
+     // On standard workdays, if TPT > min coverage, M should generally be > T
      if (TPT > MIN_COVERAGE_TPT && !day.isHoliday && !day.isWeekend && M <= T) {
          dayPassed = false;
-         details.push(`M<=T (M=${M},T=${T}) on std work day`);
+         details.push(`M<=T (M=${M},T=${T}) en día laboral estándar con TPT>${MIN_COVERAGE_TPT}`);
      }
 
      if(!dayPassed) {
          results.push({
-           rule: `Priority 2 - Coverage/Ratio (${format(parseISO(day.date), 'dd/MM')})`,
+           rule: `Prioridad 2 - Cobertura/Ratio (${format(parseISO(day.date), 'dd/MM')})`,
            passed: false,
-           details: `Failed: ${details.join(', ')}`,
+           details: `Falló: ${details.join(', ')}`,
          });
          prio2Passed = false;
      }
    });
    if (prio2Passed) {
-        results.push({ rule: `Priority 2 - Coverage/Ratio (Overall)`, passed: true, details: 'Passed'});
+        results.push({ rule: `Prioridad 2 - Cobertura/Ratio (General)`, passed: true, details: 'Pasó'});
     }
 
 
-  // Prio 3: Target D Count & D not on Holiday
+  // Prio 3: Correct number of 'D' days (equal to weekend days in month) and no 'D' on holidays
    const weekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
    let prio3Passed = true;
 
    employees.forEach(emp => {
+       // Skip if employee is on leave for the entire month
        const isOnLeaveFullMonth = absences.some(a => {
            if (a.employeeId !== emp.id || !a.startDate || !a.endDate) return false;
            try {
@@ -553,24 +589,25 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
            } catch (e) { return false; }
        });
 
-       if (isOnLeaveFullMonth) return;
+       if (isOnLeaveFullMonth) return; // Skip D count check for employees on full month leave
 
        if (schedule.employeeTotals[emp.id]) {
            const actualDs = schedule.employeeTotals[emp.id].D ?? 0;
            if (actualDs !== weekendDaysInMonth) {
                results.push({
-                   rule: `Priority 3 - Target D Count (${emp.name})`,
+                   rule: `Prioridad 3 - Cantidad D Objetivo (${emp.name})`,
                    passed: false,
-                   details: `Failed: Has ${actualDs} 'D' shifts, requires ${weekendDaysInMonth} (number of weekend days in month).`,
+                   details: `Falló: Tiene ${actualDs} 'D', requiere ${weekendDaysInMonth} (días de finde en mes).`,
                });
                prio3Passed = false;
            }
        } else {
-           console.warn(`Totals not found for ${emp.name} during Prio 3 D count validation.`);
+           // This should not happen if totals are calculated
+           console.warn(`Totales no encontrados para ${emp.name} durante validación Prio 3 D.`);
            results.push({
-               rule: `Priority 3 - Target D Count (${emp.name})`,
+               rule: `Prioridad 3 - Cantidad D Objetivo (${emp.name})`,
                passed: false,
-               details: `Failed: Totals missing, requires ${weekendDaysInMonth}.`,
+               details: `Falló: Faltan totales, requiere ${weekendDaysInMonth}.`,
            });
            prio3Passed = false;
        }
@@ -582,9 +619,9 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                      const empId = parseInt(empIdStr);
                      const employee = employeeMap.get(empId);
                       results.push({
-                         rule: `Priority 3 - D on Holiday (${employee?.name || empIdStr} on ${format(parseISO(day.date), 'dd/MM')})`,
+                         rule: `Prioridad 3 - D en Feriado (${employee?.name || empIdStr} en ${format(parseISO(day.date), 'dd/MM')})`,
                          passed: false,
-                         details: `Failed: ${employee?.name || `Emp ${empId}`} has D on holiday ${day.date}`,
+                         details: `Falló: ${employee?.name || `Emp ${empId}`} tiene D en feriado ${day.date}`,
                      });
                      prio3Passed = false;
                  }
@@ -592,15 +629,15 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
         }
     });
      if (prio3Passed) {
-       results.push({ rule: `Priority 3 - Descansos & D Target (Overall)`, passed: true, details: `Passed. Target 'D's: ${weekendDaysInMonth}.`});
+       results.push({ rule: `Prioridad 3 - Descansos & D Objetivo (General)`, passed: true, details: `Pasó. 'D' Objetivo: ${weekendDaysInMonth}.`});
      }
 
 
-  // Prio 4: D/D Weekends
+  // Prio 4: At least one D/D (or F/F on holiday weekend) weekend for eligible employees
   let prio4Passed = true;
   let eligibleEmployeesExist = false;
   employees.forEach(emp => {
-    if (!emp.eligibleWeekend) return; 
+    if (!emp.eligibleWeekend) return;
     eligibleEmployeesExist = true;
     let ddWeekends = 0;
     for (let i = 0; i < schedule.days.length - 1; i++) {
@@ -611,31 +648,31 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
         const date2 = parseISO(day2.date);
         if (!isValid(date1) || !isValid(date2)) continue;
 
-         if (getDay(date1) === 6 && getDay(date2) === 0) { 
+        // Check if day1 is Saturday and day2 is Sunday
+         if (getDay(date1) === 6 && getDay(date2) === 0) { // Saturday is 6, Sunday is 0
            if ((day1.shifts[emp.id] === 'D' || day1.shifts[emp.id] === 'F') &&
                (day2.shifts[emp.id] === 'D' || day2.shifts[emp.id] === 'F')) {
              ddWeekends++;
            }
          }
-      } catch(e){ continue; } 
+      } catch(e){ continue; }
     }
      if (ddWeekends < REQUIRED_DD_WEEKENDS) {
          results.push({
-           rule: `Priority 4 - D/D Weekend (${emp.name})`,
+           rule: `Prioridad 4 - Finde D/D (${emp.name})`,
            passed: false,
-           details: `Failed: Has ${ddWeekends} (D/D or F/F), requires ${REQUIRED_DD_WEEKENDS}`,
+           details: `Falló: Tiene ${ddWeekends} (D/D o F/F), requiere ${REQUIRED_DD_WEEKENDS}`,
          });
          prio4Passed = false;
      }
   });
     if (prio4Passed && eligibleEmployeesExist) {
-       results.push({ rule: `Priority 4 - D/D Weekend (Overall)`, passed: true, details: 'Passed'});
+       results.push({ rule: `Prioridad 4 - Finde D/D (General)`, passed: true, details: 'Pasó'});
    } else if (!eligibleEmployeesExist) {
-        results.push({ rule: `Priority 4 - D/D Weekend (Overall)`, passed: true, details: 'N/A (No employees eligible)'});
+        results.push({ rule: `Prioridad 4 - Finde D/D (General)`, passed: true, details: 'N/A (No hay empleados elegibles)'});
    }
 
-
-   // Prio 5: Max Consecutive Days
+  // Prio 5: Max consecutive work days
    let maxConsecutiveOverall = 0;
    let maxConsecutiveEmployee = '';
    let prio5PassedOverall = true;
@@ -644,14 +681,16 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
        let currentConsecutive = 0;
        let maxForEmployee = 0;
 
+       // Initialize currentConsecutive with history before the schedule starts
         const firstDayStr = schedule.days[0]?.date;
        if(firstDayStr){
             const initialConsecutive = getConsecutiveWorkDaysBefore(emp.id, firstDayStr, schedule, employees);
             currentConsecutive = initialConsecutive;
-            maxForEmployee = initialConsecutive;
+            maxForEmployee = initialConsecutive; // Initialize maxForEmployee with this value
        } else {
-            console.warn("Schedule has no days, cannot calculate consecutive days.")
-            return; 
+            // Should not happen if schedule is initialized
+            console.warn("Horario no tiene días, no se puede calcular días consecutivos.")
+            return;
        }
 
 
@@ -660,13 +699,16 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
            if (shift === 'M' || shift === 'T') {
                currentConsecutive++;
            } else {
+                // Only reset if it's a non-working shift (D, C, F, LAO, LM) or null
                 if (shift !== 'M' && shift !== 'T') {
                    maxForEmployee = Math.max(maxForEmployee, currentConsecutive);
-                   currentConsecutive = 0; 
+                   currentConsecutive = 0;
                 }
            }
        });
+       // Final check after iterating all days for the current employee
         maxForEmployee = Math.max(maxForEmployee, currentConsecutive);
+
 
          if(maxForEmployee > maxConsecutiveOverall){
              maxConsecutiveOverall = maxForEmployee;
@@ -675,28 +717,29 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
 
          if (maxForEmployee > MAX_CONSECUTIVE_WORK_DAYS) {
              const empTotals = schedule.employeeTotals[emp.id];
+             // Only report if the employee actually worked (to avoid false positives for full-month LAO/LM)
              if(empTotals && (empTotals.workedDays > 0 || empTotals.M > 0 || empTotals.T > 0)) {
                   results.push({
-                      rule: `Priority 5 - Max Consecutive Days (${emp.name})`,
+                      rule: `Prioridad 5 - Máx Días Consecutivos (${emp.name})`,
                       passed: false,
-                      details: `Failed: Worked ${maxForEmployee} consecutive days (Max ${MAX_CONSECUTIVE_WORK_DAYS})`,
+                      details: `Falló: Trabajó ${maxForEmployee} días consecutivos (Máx ${MAX_CONSECUTIVE_WORK_DAYS})`,
                   });
                   prio5PassedOverall = false;
               } else if (!empTotals) {
-                   console.warn(`Totals missing for ${emp.name}, cannot accurately assess Prio 5 violation`)
+                   console.warn(`Faltan totales para ${emp.name}, no se puede evaluar Prio 5 con precisión`)
               }
          }
    });
     results.push({
-        rule: `Priority 5 - Max Consecutive Days (Overall)`,
+        rule: `Prioridad 5 - Máx Días Consecutivos (General)`,
         passed: prio5PassedOverall,
         details: prio5PassedOverall
-            ? `Passed (Max found: ${maxConsecutiveOverall})`
-            : `Failed (Max found: ${maxConsecutiveOverall} by ${maxConsecutiveEmployee || 'N/A'})`,
+            ? `Pasó (Máx encontrado: ${maxConsecutiveOverall})`
+            : `Falló (Máx encontrado: ${maxConsecutiveOverall} por ${maxConsecutiveEmployee || 'N/A'})`,
     });
 
 
-  // --- Flexible Rules Validation ---
+    // Flexible Rule 1: T followed by M (12h rest)
     let t_m_violations = 0;
     let t_m_details: string[] = [];
      employees.forEach(emp => {
@@ -706,6 +749,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                  const currentShift = schedule.days[i].shifts[emp.id];
 
                  if (currentShift === 'M') {
+                     // Check previous day
                       const prevDate = subDays(parseISO(currentDayDateStr), 1);
                       const prevDateStr = format(prevDate, 'yyyy-MM-dd');
                       const prevDaySchedule = schedule.days.find(d => d.date === prevDateStr);
@@ -713,65 +757,69 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                       if (prevDaySchedule) {
                           prevShift = prevDaySchedule.shifts[emp.id];
                       } else {
+                          // Check history if it's the first day of the schedule
                           prevShift = emp.history?.[prevDateStr] || null;
                       }
 
                      if (prevShift === 'T') {
                         t_m_violations++;
-                        t_m_details.push(`${emp.name} on ${format(parseISO(currentDayDateStr), 'dd/MM')}`);
+                        t_m_details.push(`${emp.name} en ${format(parseISO(currentDayDateStr), 'dd/MM')}`);
                      }
                  }
-              } catch (e) { /* Ignore date parsing errors */ }
+              } catch (e) { /* Ignore date parsing errors for robust validation */ }
          }
      })
       results.push({
-        rule: `Flexible 1 - T->M 12h Rest`,
-        passed: t_m_violations === 0, 
-        details: t_m_violations === 0 ? 'No violations detected' : `Potential Violations: ${t_m_violations} instance(s) (${t_m_details.slice(0, 3).join(', ')}${t_m_violations > 3 ? '...' : ''})`,
+        rule: `Flexible 1 - Descanso T->M 12h`,
+        passed: t_m_violations === 0, // Considered "passed" if no hard violations, but still noted
+        details: t_m_violations === 0 ? 'No se detectaron violaciones' : `Violaciones Potenciales: ${t_m_violations} instancia(s) (${t_m_details.slice(0, 3).join(', ')}${t_m_violations > 3 ? '...' : ''})`,
     });
 
-
+    // Flexible Rule 4: Target staffing levels
     let staffingDeviations = 0;
      schedule.days.forEach(day => {
         const { M, T } = day.totals;
         const isWorkDay = !day.isHoliday && !day.isWeekend;
         const targetM = isWorkDay ? TARGET_M_WORKDAY : TARGET_M_WEEKEND_HOLIDAY;
-        const targetT = TARGET_T; 
+        const targetT = TARGET_T; // Target T is usually consistent
 
          if(M !== targetM || T !== targetT) {
              staffingDeviations++;
          }
      })
       results.push({
-          rule: `Flexible 4 - Target Staffing (Overall)`,
-          passed: true, 
-          details: staffingDeviations === 0 ? 'All days met target staffing.' : `${staffingDeviations} day(s) deviated from target staffing (Target WDay: ${TARGET_M_WORKDAY}M/${TARGET_T}T, Wknd/Hol: ${TARGET_M_WEEKEND_HOLIDAY}M/${TARGET_T}T).`,
+          rule: `Flexible 4 - Dotación Objetivo (General)`,
+          passed: true, // Always true as it's flexible, details provide info
+          details: staffingDeviations === 0 ? 'Todos los días cumplieron dotación objetivo.' : `${staffingDeviations} día(s) se desviaron de la dotación objetivo (Obj Día Lab: ${TARGET_M_WORKDAY}M/${TARGET_T}T, Finde/Fer: ${TARGET_M_WEEKEND_HOLIDAY}M/${TARGET_T}T).`,
       });
 
-
+    // Flexible Rule 5: M/T balance for employees (excluding those with fixed weekly shifts)
     let balanceIssues = 0;
      employees.forEach(emp => {
          const empTotals = schedule.employeeTotals[emp.id];
-         if (!empTotals) return; 
+         if (!empTotals) return; // Skip if no totals (should not happen)
 
+         // Skip if employee has a fixed weekly work shift defined, as their M/T counts will be skewed by that
          if(emp.preferences?.fixedWorkShift) return;
 
          const { M, T } = empTotals;
          const totalShifts = M + T;
-         if (totalShifts > 0) {
+         if (totalShifts > 0) { // Only consider if they worked M or T at all
              const diff = Math.abs(M - T);
-             const imbalanceThreshold = 3;
+             const imbalanceThreshold = 3; // Example: more than 3 M's than T's, or vice-versa
              if (diff > imbalanceThreshold) {
                 balanceIssues++;
              }
          }
      });
        results.push({
-           rule: `Flexible 5 - M/T Balance (Overall)`,
-           passed: true, 
-           details: balanceIssues === 0 ? 'Employee M/T counts appear balanced.' : `${balanceIssues} employee(s) show potential M/T imbalance (diff > 3).`,
+           rule: `Flexible 5 - Balance M/T (General)`,
+           passed: true, // Always true
+           details: balanceIssues === 0 ? 'Conteos M/T de empleados parecen balanceados.' : `${balanceIssues} empleado(s) muestran desbalance M/T potencial (dif > 3).`,
        });
 
+
+    // Check employee-specific preferences (Flexible)
     employees.forEach(emp => {
         if (emp.preferences?.preferWeekendWork || emp.preferences?.preferMondayRest || emp.preferences?.preferThursdayT) {
             const prefs = emp.preferences;
@@ -779,138 +827,159 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
             schedule.days.forEach(day => {
                 try {
                      const shift = day.shifts[emp.id];
-                     if (!shift) return;
+                     if (!shift) return; // Skip if no shift assigned
 
                      const date = parseISO(day.date);
                      if (!isValid(date)) return;
-                     const dayOfWeek = getDay(date);
+                     const dayOfWeek = getDay(date); // Sunday is 0, Monday is 1, ..., Saturday is 6
 
-                     if (prefs.preferWeekendWork && (shift === 'D' || shift === 'C' || shift === 'F') && day.isWeekend) violations.push(`Franco/Libre on preferred work weekend ${format(date, 'dd/MM')}`);
-                     if (prefs.preferMondayRest && (shift === 'M' || shift === 'T') && dayOfWeek === 1 && !day.isHoliday) violations.push(`Worked on preferred rest Monday ${format(date, 'dd/MM')}`);
-                     if (prefs.preferThursdayT && shift === 'M' && dayOfWeek === 4 && !day.isHoliday) violations.push(`Worked M on preferred T Thursday ${format(date, 'dd/MM')}`);
-                } catch (e) { /* Ignore date errors */ }
+                     if (prefs.preferWeekendWork && (shift === 'D' || shift === 'C' || shift === 'F') && day.isWeekend) violations.push(`Franco/Libre en finde de trabajo preferido ${format(date, 'dd/MM')}`);
+                     if (prefs.preferMondayRest && (shift === 'M' || shift === 'T') && dayOfWeek === 1 && !day.isHoliday) violations.push(`Trabajó en lunes de descanso preferido ${format(date, 'dd/MM')}`);
+                     if (prefs.preferThursdayT && shift === 'M' && dayOfWeek === 4 && !day.isHoliday) violations.push(`Trabajó M en jueves de T preferido ${format(date, 'dd/MM')}`);
+                } catch (e) { /* Ignore date parsing issues */ }
             })
              if (violations.length > 0) {
                 results.push({
-                    rule: `Flexible Preference - ${emp.name}`,
-                    passed: true, 
-                    details: `Preference Mismatches: ${violations.slice(0,2).join(', ')}${violations.length > 2 ? '...' : ''}`
+                    rule: `Preferencia Flexible - ${emp.name}`,
+                    passed: true, // It's a preference, so always "passed" but note deviations
+                    details: `Desajustes de Preferencia: ${violations.slice(0,2).join(', ')}${violations.length > 2 ? '...' : ''}`
                 });
             }
         }
     });
 
+
+    // Final Check: Completeness - any null shifts?
     let unassignedCount = 0;
+    let unassignedDetails: string[] = [];
     schedule.days.forEach(day => {
         employees.forEach(emp => {
             if (day.shifts[emp.id] === null) {
+                // Check if employee is on full month leave for this month before counting as unassigned
                 const isOnLeaveFullMonth = absences.some(a =>
                     a.employeeId === emp.id &&
-                    isValid(parseISO(a.startDate)) && isValid(parseISO(a.endDate)) && 
+                    a.startDate && a.endDate && // Ensure dates are defined
+                    isValid(parseISO(a.startDate)) && isValid(parseISO(a.endDate)) &&
                     parseISO(a.startDate) <= startOfMonth(parseISO(day.date)) &&
                     parseISO(a.endDate) >= endOfMonth(parseISO(day.date))
                 );
                 if(!isOnLeaveFullMonth){
                    unassignedCount++;
+                   if(unassignedDetails.length < 5) unassignedDetails.push(`${emp.name} en ${format(parseISO(day.date), 'dd/MM')}`);
                 }
             }
         })
     });
      if (unassignedCount > 0) {
         results.push({
-            rule: "Completeness Check",
+            rule: "Verificación de Completitud",
             passed: false,
-            details: `Failed: ${unassignedCount} employee-day slots remain unassigned (excluding full month absences).`,
+            details: `Falló: ${unassignedCount} ranuras empleado-día siguen sin asignar (excl. ausencias mes completo). Ej: ${unassignedDetails.join(', ')}${unassignedCount > 5 ? '...' : ''}`,
         });
     } else {
          results.push({
-            rule: "Completeness Check",
+            rule: "Verificación de Completitud",
             passed: true,
-            details: `Passed: All employee-day slots assigned.`,
+            details: `Pasó: Todas las ranuras empleado-día asignadas.`,
         });
     }
 
 
-    results.sort((a, b) => {
+    // Sort results: Completeness first, then by priority, then by passed/failed, then alphabetically
+     results.sort((a, b) => {
          const getPrio = (rule: string): number => {
-              if (rule.includes("Completeness Check")) return 0; 
-             if (rule.startsWith("Priority 1")) return 1;
-             if (rule.startsWith("Priority 2")) return 2;
-             if (rule.startsWith("Priority 3")) return 3;
-             if (rule.startsWith("Priority 4")) return 4;
-             if (rule.startsWith("Priority 5")) return 5;
-             if (rule.startsWith("Flexible 1")) return 6; 
-             if (rule.startsWith("Flexible 5")) return 7; 
-             if (rule.startsWith("Flexible 4")) return 8; 
-             if (rule.startsWith("Flexible Preference")) return 9; 
-             if (rule.startsWith("Flexible")) return 10; 
-             if (rule.startsWith("Generator Info")) return 12;
-             return 11; 
+              if (rule.includes("Completitud")) return 0;
+             if (rule.startsWith("Prioridad 1")) return 1;
+             if (rule.startsWith("Prioridad 2")) return 2;
+             if (rule.startsWith("Prioridad 3")) return 3;
+             if (rule.startsWith("Prioridad 4")) return 4;
+             if (rule.startsWith("Prioridad 5")) return 5;
+             if (rule.startsWith("Flexible 1")) return 6; // T->M rest
+             if (rule.startsWith("Flexible 5")) return 7; // M/T Balance
+             if (rule.startsWith("Flexible 4")) return 8; // Staffing Target
+             if (rule.startsWith("Preferencia Flexible")) return 9;
+             if (rule.startsWith("Flexible")) return 10; // Other flexible
+             if (rule.startsWith("Info Generador")) return 12; // Generator info last
+             return 11; // Default for any other rule
          }
          const prioA = getPrio(a.rule);
          const prioB = getPrio(b.rule);
+
          if (prioA !== prioB) return prioA - prioB;
+         // Within the same priority, show failed items first
           if (a.passed !== b.passed) return a.passed ? 1 : -1;
+         // Then sort by rule name
          return a.rule.localeCompare(b.rule);
      });
-
 
   return results;
 }
 
 
+function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[]) {
+    const weekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
 
-function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absences: Absence[]) {
-
-    console.log("Starting Pass 1: Essential Coverage (M/T)");
+    // --- Pass 1: Ensure Essential Coverage (M/T) ---
+    console.log("Pase 1: Cobertura Esencial (M/T)");
     schedule.days.forEach(day => {
         const dateStr = day.date;
-        let assignedInDay = { M: 0, T: 0 }; 
-        Object.values(day.shifts).forEach(s => { 
+        let assignedInDay = { M: 0, T: 0 };
+        // Count already assigned M/T shifts (from fixed assignments or LAO/LM)
+        Object.values(day.shifts).forEach(s => {
             if (s === 'M') assignedInDay.M++;
             if (s === 'T') assignedInDay.T++;
         });
 
-        let availableEmployees = employees.filter(e => day.shifts[e.id] === null); 
+        let availableEmployees = employees.filter(e => day.shifts[e.id] === null); // Only consider unassigned slots
 
         const assignShiftIfPossible = (shiftType: 'M' | 'T'): boolean => {
             const candidates = availableEmployees
                 .filter(e => canWorkShift(e, dateStr, shiftType, schedule, employees))
-                .sort((a, b) => a.id - b.id); 
+                // Prioritize employees with fewer total worked days so far
+                .sort((a, b) => (schedule.employeeTotals[a.id]?.workedDays || 0) - (schedule.employeeTotals[b.id]?.workedDays || 0));
 
             if (candidates.length > 0) {
                 assignShift(candidates[0].id, dateStr, shiftType, schedule);
-                assignedInDay[shiftType]++;
-                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
-                return true;
+                 if (day.shifts[candidates[0].id] === shiftType) { // Check if assignShift was successful
+                    assignedInDay[shiftType]++;
+                    availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id); // Remove assigned employee
+                    return true;
+                }
             }
             return false;
         };
 
+        // Ensure minimum M coverage
         while (assignedInDay.M < MIN_COVERAGE_M) {
             if (!assignShiftIfPossible('M')) break;
         }
+        // Ensure minimum T coverage
         while (assignedInDay.T < MIN_COVERAGE_T) {
             if (!assignShiftIfPossible('T')) break;
         }
+        // Ensure minimum TPT coverage
         while (assignedInDay.M + assignedInDay.T < MIN_COVERAGE_TPT) {
+            // Try assigning M first, then T, if TPT is still low
             if (assignShiftIfPossible('M')) continue;
             if (assignShiftIfPossible('T')) continue;
-            console.warn(`Could not meet TPT >= ${MIN_COVERAGE_TPT} on ${dateStr}. Current M=${assignedInDay.M}, T=${assignedInDay.T}`);
-            break;
+            console.warn(`No se pudo cumplir TPT >= ${MIN_COVERAGE_TPT} en ${dateStr}. M actual=${assignedInDay.M}, T=${assignedInDay.T}`);
+            break; // Cannot meet TPT minimum
         }
 
+        // On standard workdays, if TPT > min, try to make M > T
         if (assignedInDay.M + assignedInDay.T > MIN_COVERAGE_TPT && !day.isWeekend && !day.isHoliday) {
             while (assignedInDay.M <= assignedInDay.T) {
                 if (!assignShiftIfPossible('M')) {
-                     console.warn(`Could not enforce M > T rule on ${dateStr}. No more available M shifts.`);
+                     console.warn(`No se pudo aplicar regla M > T en ${dateStr}. No hay más turnos M disponibles.`);
                     break;
                 }
             }
         }
     });
+    calculateFinalTotals(schedule, employees, absences); // Recalculate totals after Pass 1
 
-    console.log("Starting Pass 2: Preferred/Target Staffing");
+    // --- Pass 2: Aim for Target Staffing Levels ---
+    console.log("Pase 2: Dotación Preferida/Objetivo");
     schedule.days.forEach(day => {
         const dateStr = day.date;
         let currentM = Object.values(day.shifts).filter(s => s === 'M').length;
@@ -920,144 +989,219 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
 
         let availableEmployees = employees.filter(e => day.shifts[e.id] === null);
 
+         // Add M shifts up to target
          while (currentM < targetM) {
              const candidates = availableEmployees
                  .filter(e => canWorkShift(e, dateStr, 'M', schedule, employees))
-                 .sort((a, b) => a.id - b.id);
-             if (candidates.length === 0) break;
+                 // Prioritize those with fewer M shifts
+                 .sort((a,b) => (schedule.employeeTotals[a.id]?.M || 0) - (schedule.employeeTotals[b.id]?.M || 0));
+             if (candidates.length === 0) break; // No more candidates for M
              assignShift(candidates[0].id, dateStr, 'M', schedule);
-             currentM++;
-             availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+              if (day.shifts[candidates[0].id] === 'M') { // If assignment was successful
+                currentM++;
+                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+              } else { // Shift was not assignable (canWorkShift returned false), remove from candidates for this iteration
+                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+              }
          }
 
+         // Add T shifts up to target
          while (currentT < targetT) {
              const candidates = availableEmployees
                  .filter(e => canWorkShift(e, dateStr, 'T', schedule, employees))
-                 .sort((a, b) => a.id - b.id);
-             if (candidates.length === 0) break;
+                 // Prioritize those with fewer T shifts
+                 .sort((a,b) => (schedule.employeeTotals[a.id]?.T || 0) - (schedule.employeeTotals[b.id]?.T || 0));
+             if (candidates.length === 0) break; // No more candidates for T
              assignShift(candidates[0].id, dateStr, 'T', schedule);
-             currentT++;
-             availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+             if (day.shifts[candidates[0].id] === 'T') { // If assignment was successful
+                currentT++;
+                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+             } else {
+                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
+             }
          }
     });
+    calculateFinalTotals(schedule, employees, absences); // Recalculate totals after Pass 2
 
-
-    console.log("Starting Pass 3: Assign Rests (D, F, C) aiming for target D count");
-    const weekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
+    // --- Pass 3: Assign Rest Days (D, F, C), aiming for D target ---
+    console.log("Pase 3: Asignar Descansos (D, F, C) apuntando a D objetivo");
     const employeeCurrentDTotals: { [empId: number]: number } = {};
-    employees.forEach(emp => employeeCurrentDTotals[emp.id] = 0);
-
-    // Pre-count D shifts from fixed assignments or absences already set
-    schedule.days.forEach(day => {
-        employees.forEach(emp => {
-            if (day.shifts[emp.id] === 'D') {
-                employeeCurrentDTotals[emp.id]++;
-            }
-        });
+    employees.forEach(emp => {
+        employeeCurrentDTotals[emp.id] = schedule.employeeTotals[emp.id]?.D || 0;
     });
+
 
     schedule.days.forEach(day => {
          const dateStr = day.date;
-         employees.forEach(emp => {
-             if (day.shifts[emp.id] === null) { // If still unassigned
+         // Sort employees: those needing D most, then those with fewer D's overall
+         const employeesSortedForRest = [...employees].sort((a, b) => {
+             const needsDA = employeeCurrentDTotals[a.id] < weekendDaysInMonth;
+             const needsDB = employeeCurrentDTotals[b.id] < weekendDaysInMonth;
+
+             if (needsDA && !needsDB) return -1; // A needs D more urgently
+             if (!needsDA && needsDB) return 1;  // B needs D more urgently
+
+             // If both need or don't need, prioritize by current D count (ascending)
+             return (employeeCurrentDTotals[a.id]) - (employeeCurrentDTotals[b.id]);
+         });
+
+
+         employeesSortedForRest.forEach(emp => {
+             if (day.shifts[emp.id] === null) { // Only if slot is still empty
+                // Skip if employee is on leave for the entire month for this day's month
                 const isOnLeaveFullMonth = absences.some(a => {
                     if(a.employeeId !== emp.id || !a.startDate || !a.endDate) return false;
                     try {
                         const absenceStart = parseISO(a.startDate);
                         const absenceEnd = parseISO(a.endDate);
-                        const monthStart = startOfMonth(new Date(schedule.year, schedule.month - 1));
-                        const monthEnd = endOfMonth(new Date(schedule.year, schedule.month - 1));
+                        const monthStart = startOfMonth(parseISO(day.date)); // Use day.date for month context
+                        const monthEnd = endOfMonth(parseISO(day.date));
                         return isValid(absenceStart) && isValid(absenceEnd) &&
                                absenceStart <= monthStart && absenceEnd >= monthEnd;
                     } catch (e) { return false; }
                 });
 
-                if (isOnLeaveFullMonth) return; // Skip employees on full month leave for D assignment
-
+                if (isOnLeaveFullMonth) return; // Skip assignment for full-month leave
 
                  if (day.isHoliday) {
-                     assignShift(emp.id, dateStr, 'F', schedule);
+                     // On holidays, assign 'F' if possible
+                     if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
+                        assignShift(emp.id, dateStr, 'F', schedule);
+                     }
                  }
-                 // Try to assign D if employee still needs more Ds and D is possible
+                 // If not a holiday, try to assign 'D' if employee needs it and can take it
                  else if (employeeCurrentDTotals[emp.id] < weekendDaysInMonth && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                       assignShift(emp.id, dateStr, 'D', schedule);
-                      if (day.shifts[emp.id] === 'D') { // Check if D was successfully assigned
+                      if (day.shifts[emp.id] === 'D') { // If 'D' was successfully assigned
                          employeeCurrentDTotals[emp.id]++;
                       }
                  }
-                 // Fallback to C if D not needed/possible, and C is possible
+                 // If 'D' wasn't assigned (either not needed, not possible, or holiday), try 'C'
                  else if (canWorkShift(emp, dateStr, 'C', schedule, employees)) {
                      assignShift(emp.id, dateStr, 'C', schedule);
                  }
-                 // If still unassigned (e.g., D was needed but not possible, C not possible), try D again as a last resort if possible
-                 else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
+                 // As a last resort, if still null and not a holiday, assign 'D' even if target is met, if possible
+                 else if (!day.isHoliday && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                     assignShift(emp.id, dateStr, 'D', schedule);
                      if (day.shifts[emp.id] === 'D') {
                          employeeCurrentDTotals[emp.id]++;
                      }
                  }
                   else {
-                      console.warn(`Could not assign any rest shift (D/F/C) to ${emp.name} on ${dateStr}. Slot remains empty.`);
+                      // If still null, it means no valid rest shift could be assigned.
+                      // This will be caught by completeness check or other validations.
+                      console.warn(`No se pudo asignar turno de descanso (D/F/C) a ${emp.name} en ${dateStr}. Ranura vacía.`);
                  }
              }
          });
      });
+    calculateFinalTotals(schedule, employees, absences); // Recalculate after Pass 3
 
-     // --- Pass 4: Final Check / Cleanup (Optional) ---
+    // Pass 3.5: Fill remaining nulls with C if possible, or D if not a holiday and D count allows, or F if holiday
+    console.log("Pase 3.5: Llenar NULOS restantes con C, D o F");
+    schedule.days.forEach(day => {
+        const dateStr = day.date;
+        employees.forEach(emp => {
+            if (day.shifts[emp.id] === null) { // Only if slot is still empty
+                const isOnLeaveFullMonth = absences.some(a => { /* ... same full month leave check ... */
+                     if(a.employeeId !== emp.id || !a.startDate || !a.endDate) return false;
+                    try {
+                        const absenceStart = parseISO(a.startDate);
+                        const absenceEnd = parseISO(a.endDate);
+                        const monthStart = startOfMonth(parseISO(day.date));
+                        const monthEnd = endOfMonth(parseISO(day.date));
+                        return isValid(absenceStart) && isValid(absenceEnd) &&
+                               absenceStart <= monthStart && absenceEnd >= monthEnd;
+                    } catch (e) { return false; }
+                });
+                if (isOnLeaveFullMonth) return;
+
+                if (day.isHoliday) {
+                    if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
+                        assignShift(emp.id, dateStr, 'F', schedule);
+                    }
+                } else if (canWorkShift(emp, dateStr, 'C', schedule, employees)) {
+                    assignShift(emp.id, dateStr, 'C', schedule);
+                } else if (employeeCurrentDTotals[emp.id] < weekendDaysInMonth && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
+                    assignShift(emp.id, dateStr, 'D', schedule);
+                    if (day.shifts[emp.id] === 'D') employeeCurrentDTotals[emp.id]++;
+                } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) { // Assign D even if target met, if C not possible
+                     assignShift(emp.id, dateStr, 'D', schedule);
+                     if (day.shifts[emp.id] === 'D') employeeCurrentDTotals[emp.id]++;
+                }
+                 else {
+                    // If still null, this is problematic and should be caught by validation
+                    console.warn(`Pase 3.5: Aún no se puede asignar D/C/F a ${emp.name} en ${dateStr}`);
+                }
+            }
+        });
+    });
+    calculateFinalTotals(schedule, employees, absences); // Final calculation
 }
 
-
-// --- Main Exported Function ---
 
 export function generateSchedule(
   year: number,
   month: number,
   initialEmployees: Employee[],
-  absences: Absence[],
-  holidays: Holiday[]
+  initialAbsences: Absence[], // Renamed to avoid conflict with global/module scope 'absences'
+  initialHolidays: Holiday[] // Renamed for clarity
 ): { schedule: Schedule; report: ValidationResult[] } {
 
-  console.log("Starting Schedule Generation for", { year, month });
+  console.log("Iniciando Generación de Horario para", { year, month });
+  // Deep copy initial data to prevent modification of the original state from UI
   const employeesForGeneration: Employee[] = JSON.parse(JSON.stringify(initialEmployees));
-  currentEmployeesState = employeesForGeneration; 
+  const absencesForGeneration: Absence[] = JSON.parse(JSON.stringify(initialAbsences));
+  const holidaysForGeneration: Holiday[] = JSON.parse(JSON.stringify(initialHolidays));
+
+  // Set the global state for employees to be used by helper functions
+  currentEmployeesState = employeesForGeneration;
 
   const startTime = performance.now();
-  const schedule = initializeSchedule(year, month, employeesForGeneration, holidays);
-  console.log("Initialized schedule structure.");
+  const schedule = initializeSchedule(year, month, employeesForGeneration, holidaysForGeneration);
+  console.log("Estructura de horario inicializada.");
 
-  console.log("Applying absences...");
-  applyAbsences(schedule, absences, employeesForGeneration);
-  console.log("Applying fixed assignments/preferences...");
+  // Apply absences and fixed assignments first as they are highest priority
+  console.log("Aplicando ausencias...");
+  applyAbsences(schedule, absencesForGeneration, employeesForGeneration);
+  console.log("Aplicando asignaciones/preferencias fijas...");
   applyFixedAssignments(schedule, employeesForGeneration);
 
-  console.log("Starting iterative assignment passes...");
-  iterativeAssignShifts(schedule, employeesForGeneration, absences);
-  console.log("Finished iterative assignment passes.");
+  // Calculate initial totals AFTER absences and fixed assignments are applied
+  // This ensures these fixed items are counted before iterative assignment begins
+  calculateFinalTotals(schedule, employeesForGeneration, absencesForGeneration);
 
-  console.log("Calculating final totals...");
-  calculateFinalTotals(schedule, employeesForGeneration);
 
-  console.log("Validating final schedule...");
-  const report = validateSchedule(schedule, employeesForGeneration, absences, holidays);
+  console.log("Iniciando pases de asignación iterativa...");
+  iterativeAssignShifts(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration);
+  console.log("Pases de asignación iterativa finalizados.");
+
+  // Final calculation of all totals
+  console.log("Calculando totales finales...");
+  calculateFinalTotals(schedule, employeesForGeneration, absencesForGeneration);
+
+  console.log("Validando horario final...");
+  const report = validateSchedule(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration);
   const endTime = performance.now();
-  console.log(`Schedule generation completed in ${(endTime - startTime).toFixed(2)} ms`);
+  console.log(`Generación de horario completada en ${(endTime - startTime).toFixed(2)} ms`);
 
-   report.push({ rule: "Generator Info", passed: true, details: `Generation took ${(endTime - startTime).toFixed(2)} ms` });
+   report.push({ rule: "Info Generador", passed: true, details: `Generación tomó ${(endTime - startTime).toFixed(2)} ms` });
 
+    // Sort report again to ensure "Info Generador" is last and completeness is first
     report.sort((a, b) => {
          const getPrio = (rule: string): number => {
-             if (rule.includes("Completeness Check")) return 0;
-             if (rule.startsWith("Priority 1")) return 1;
-             if (rule.startsWith("Priority 2")) return 2;
-             if (rule.startsWith("Priority 3")) return 3;
-             if (rule.startsWith("Priority 4")) return 4;
-             if (rule.startsWith("Priority 5")) return 5;
+             if (rule.includes("Completitud")) return 0;
+             if (rule.startsWith("Prioridad 1")) return 1;
+             if (rule.startsWith("Prioridad 2")) return 2;
+             if (rule.startsWith("Prioridad 3")) return 3;
+             if (rule.startsWith("Prioridad 4")) return 4;
+             if (rule.startsWith("Prioridad 5")) return 5;
              if (rule.startsWith("Flexible 1")) return 6;
              if (rule.startsWith("Flexible 5")) return 7;
              if (rule.startsWith("Flexible 4")) return 8;
-             if (rule.startsWith("Flexible Preference")) return 9;
+             if (rule.startsWith("Preferencia Flexible")) return 9;
              if (rule.startsWith("Flexible")) return 10;
-             if (rule.startsWith("Generator Info")) return 12;
+             if (rule.startsWith("Info Generador")) return 12;
              return 11;
          }
          const prioA = getPrio(a.rule);

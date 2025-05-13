@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, Dialog
 import { Textarea } from "@/components/ui/textarea";
 import { generateSchedule, calculateFinalTotals, validateSchedule } from '@/lib/schedule-generator'; // Import calculation and validation separately
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType } from '@/types';
-import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR } from '@/types';
+import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
 import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft } from 'lucide-react';
@@ -33,6 +33,7 @@ const defaultEmployees: Employee[] = [
     { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {} }
 ];
 
+
 const defaultAbsences: Absence[] = []; // Start empty
 const defaultHolidays: Holiday[] = []; // Start empty
 
@@ -49,7 +50,7 @@ const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES), z.literal('NULL')]); // 'N
 
 const fixedAssignmentSchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha debe ser YYYY-MM-DD"),
-    shift: z.enum(SHIFT_TYPES) // Keep original enum here, null not allowed for fixed assignments
+    shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS)
 });
 
 const employeePreferenceSchema = z.object({
@@ -57,7 +58,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
-        shift: z.enum(SHIFT_TYPES) // Keep original enum here
+        shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS)
     }).optional()
 });
 
@@ -419,9 +420,15 @@ export default function Home() {
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Empleados</CardTitle>
-                                <Dialog open={isEmployeeDialogOpen} onOpenChange={setIsEmployeeDialogOpen}>
+                                <Dialog open={isEmployeeDialogOpen} onOpenChange={(isOpen) => {
+                                    setIsEmployeeDialogOpen(isOpen);
+                                    if (!isOpen) {
+                                        setEditingEmployee(null);
+                                        employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }});
+                                    }
+                                }}>
                                     <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); }}>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); setIsEmployeeDialogOpen(true);}}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                         </Button>
                                     </DialogTrigger>
@@ -473,7 +480,7 @@ export default function Home() {
                                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                                                                     <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
                                                                     <SelectContent>
-                                                                        {SHIFT_TYPES.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                        {ALLOWED_FIXED_ASSIGNMENT_SHIFTS.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                                     </SelectContent>
                                                                 </Select>
                                                             )}
@@ -508,7 +515,7 @@ export default function Home() {
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
                                                                             const currentShift = field.value?.shift ?? 'M';
-                                                                            field.onChange({ dayOfWeek: newDays, shift: currentShift });
+                                                                            field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                         }}
                                                                     />
                                                                     <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
@@ -523,7 +530,7 @@ export default function Home() {
                                                         >
                                                             <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
-                                                                {SHIFT_TYPES.filter(s => s === 'M' || s === 'T').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                {ALLOWED_FIXED_ASSIGNMENT_SHIFTS.filter(s => s === 'M' || s === 'T' || s === 'D').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                             </SelectContent>
                                                         </Select>
                                                         <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
@@ -595,9 +602,15 @@ export default function Home() {
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
-                                <Dialog open={isAbsenceDialogOpen} onOpenChange={setIsAbsenceDialogOpen}>
+                                 <Dialog open={isAbsenceDialogOpen} onOpenChange={(isOpen) => {
+                                    setIsAbsenceDialogOpen(isOpen);
+                                    if (!isOpen) {
+                                        setEditingAbsence(null);
+                                        absenceForm.reset();
+                                    }
+                                }}>
                                     <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); }}>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                         </Button>
                                     </DialogTrigger>
@@ -690,9 +703,15 @@ export default function Home() {
                         <Card>
                             <CardHeader className="flex flex-row items-center justify-between pb-2">
                                 <CardTitle className="text-lg font-medium">Feriados</CardTitle>
-                                <Dialog open={isHolidayDialogOpen} onOpenChange={setIsHolidayDialogOpen}>
+                                 <Dialog open={isHolidayDialogOpen} onOpenChange={(isOpen) => {
+                                        setIsHolidayDialogOpen(isOpen);
+                                        if (!isOpen) {
+                                            setEditingHoliday(null);
+                                            holidayForm.reset();
+                                        }
+                                    }}>
                                     <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); }}>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); setIsHolidayDialogOpen(true); }}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                         </Button>
                                     </DialogTrigger>
@@ -775,8 +794,8 @@ export default function Home() {
                     <Table className="min-w-full border-collapse">
                     <TableHeader>
                         <TableRow className="bg-secondary">
-                        <TableHead className="sticky left-0 bg-secondary z-10 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
-                        <TableHead className={cn("sticky left-[170px] bg-secondary z-10 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
+                        <TableHead className="sticky left-0 bg-secondary z-20 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
+                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
 
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead

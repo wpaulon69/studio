@@ -1,4 +1,5 @@
 
+
 export interface Employee {
   id: number;
   name: string;
@@ -16,6 +17,9 @@ export interface Employee {
 
 export type ShiftType = "M" | "T" | "D" | "C" | "F" | "LM" | "LAO";
 export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "C", "F", "LM", "LAO"];
+
+// Define the allowed shift types for fixed assignments, including 'D'
+export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D"];
 
 
 export interface Absence {
@@ -88,10 +92,10 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800", // #d4edda
   T: "bg-blue-100 text-blue-800", // #cce5ff
   D: "bg-gray-200 text-gray-700", // #e9ecef
-  C: "bg-orange-100 text-orange-800", // Assign a different color for C if needed
-  F: "bg-purple-100 text-purple-800", // Assign a different color for F if needed
+  C: "bg-orange-100 text-orange-800", 
+  F: "bg-purple-100 text-purple-800", 
   LM: "bg-red-100 text-red-800", // #f8d7da
-  LAO: "bg-pink-100 text-pink-800", // Assign a different color for LAO if needed
+  LAO: "bg-pink-100 text-pink-800", 
 };
 
 export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd

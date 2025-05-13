@@ -14,7 +14,7 @@ import { differenceInDays, format, parseISO, addDays, getDay, isWeekend, startOf
 
 // --- Constants and Configuration ---
 const MAX_CONSECUTIVE_WORK_DAYS = 6;
-const MAX_CONSECUTIVE_D_DAYS = 2; // New constant
+const MAX_CONSECUTIVE_D_DAYS = 2; 
 const REQUIRED_DD_WEEKENDS = 1; // Minimum D/D weekends per eligible employee
 const MIN_COVERAGE_TPT = 2;
 const MIN_COVERAGE_M = 1;
@@ -66,13 +66,13 @@ function initializeSchedule(year: number, month: number, employees: Employee[], 
         acc[emp.id] = null; // Initialize all shifts to null
         return acc;
       }, {} as { [employeeId: number]: ShiftType | null }),
-      totals: { M: 0, T: 0, D: 0, C: 0, F: 0, LM: 0, LAO: 0, TPT: 0 },
+      totals: { M: 0, T: 0, D: 0, F: 0, LM: 0, LAO: 0, TPT: 0 },
     };
   });
 
   const employeeTotals: { [employeeId: number]: EmployeeTotals } = employees.reduce((acc, emp) => {
     acc[emp.id] = {
-      workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, C: 0, D: 0, LM: 0, LAO: 0
+      workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, D: 0, LM: 0, LAO: 0
     };
     return acc;
   }, {} as { [employeeId: number]: EmployeeTotals });
@@ -349,11 +349,11 @@ function calculateEmployeeDTarget(employee: Employee, schedule: Schedule, absenc
 
 export function calculateFinalTotals(schedule: Schedule, employees: Employee[], absencesForTotals?: Absence[]) {
   schedule.days.forEach(day => {
-    day.totals = { M: 0, T: 0, D: 0, C: 0, F: 0, LM: 0, LAO: 0, TPT: 0 };
+    day.totals = { M: 0, T: 0, D: 0, F: 0, LM: 0, LAO: 0, TPT: 0 };
   });
    employees.forEach(emp => {
         if (!schedule.employeeTotals[emp.id]) {
-             schedule.employeeTotals[emp.id] = { workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, C: 0, D: 0, LM: 0, LAO: 0 };
+             schedule.employeeTotals[emp.id] = { workedDays: 0, M: 0, T: 0, freeSaturdays: 0, freeSundays: 0, F: 0, D: 0, LM: 0, LAO: 0 };
         } else {
              Object.keys(schedule.employeeTotals[emp.id]).forEach(key => {
                   (schedule.employeeTotals[emp.id] as any)[key] = 0;
@@ -388,7 +388,6 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
         if (shift === 'M') { day.totals.M++; currentEmpTotals.M++; currentEmpTotals.workedDays++; }
         else if (shift === 'T') { day.totals.T++; currentEmpTotals.T++; currentEmpTotals.workedDays++; }
         else if (shift === 'D') { day.totals.D++; currentEmpTotals.D++; }
-        else if (shift === 'C') { day.totals.C++; currentEmpTotals.C++; }
         else if (shift === 'F') { day.totals.F++; currentEmpTotals.F++; }
         else if (shift === 'LM') { day.totals.LM++; currentEmpTotals.LM++; }
         else if (shift === 'LAO') { day.totals.LAO++; currentEmpTotals.LAO++; }
@@ -406,7 +405,7 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
              console.warn(`Totals missing for employee ${emp.name} (${emp.id}) during final verification.`);
              return;
          }
-         const totalAssignedShiftsOrAbsences = totals.workedDays + totals.C + totals.D + totals.F + totals.LM + totals.LAO;
+         const totalAssignedShiftsOrAbsences = totals.workedDays + totals.D + totals.F + totals.LM + totals.LAO;
 
          if(totalAssignedShiftsOrAbsences !== numDaysInMonth){
              const isOnLeaveFullMonth = absencesForTotals?.some(a => {
@@ -664,7 +663,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                currentConsecutiveD++;
                maxForEmployeeWork = Math.max(maxForEmployeeWork, currentConsecutiveWork); // End work streak
                currentConsecutiveWork = 0;
-           } else { // Other shifts (C, F, LAO, LM, null) break both streaks
+           } else { // Other shifts (F, LAO, LM, null) break both streaks
                 maxForEmployeeWork = Math.max(maxForEmployeeWork, currentConsecutiveWork);
                 currentConsecutiveWork = 0;
                 maxForEmployeeD = Math.max(maxForEmployeeD, currentConsecutiveD);
@@ -811,7 +810,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                      const date = parseISO(day.date);
                      if (!isValid(date)) return;
 
-                     if (prefs.preferWeekendWork && (shift === 'D' || shift === 'C' || shift === 'F') && day.isWeekend) violations.push(`Franco/Libre en finde de trabajo preferido ${format(date, 'dd/MM')}`);
+                     if (prefs.preferWeekendWork && (shift === 'D' || shift === 'F') && day.isWeekend) violations.push(`Franco/Libre en finde de trabajo preferido ${format(date, 'dd/MM')}`);
                 } catch (e) { /* Ignore date parsing issues */ }
             })
              if (violations.length > 0) {
@@ -983,8 +982,8 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
     });
     calculateFinalTotals(schedule, employees, absences);
 
-    // --- Pass 3: Assign Rest Days (D, F, C), aiming for proportional D target ---
-    console.log("Pase 3: Asignar Descansos (D, F, C) apuntando a D objetivo proporcional");
+    // --- Pass 3: Assign Rest Days (D, F), aiming for proportional D target ---
+    console.log("Pase 3: Asignar Descansos (D, F) apuntando a D objetivo proporcional");
     const employeeDTargets: { [empId: number]: number } = {};
     employees.forEach(emp => {
         employeeDTargets[emp.id] = calculateEmployeeDTarget(emp, schedule, absences, baseWeekendDaysInMonth);
@@ -1027,14 +1026,11 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
                  else if ((schedule.employeeTotals[emp.id]?.D || 0) < employeeDTargets[emp.id] && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                       assignShift(emp.id, dateStr, 'D', schedule);
                  }
-                 else if (canWorkShift(emp, dateStr, 'C', schedule, employees)) {
-                     assignShift(emp.id, dateStr, 'C', schedule);
-                 }
-                 else if (!day.isHoliday && canWorkShift(emp, dateStr, 'D', schedule, employees)) { // Assign D if C not possible, even if target met
+                 else if (!day.isHoliday && canWorkShift(emp, dateStr, 'D', schedule, employees)) { // Assign D if other conditions not met
                     assignShift(emp.id, dateStr, 'D', schedule);
                  }
                   else {
-                      console.warn(`No se pudo asignar turno de descanso (D/F/C) a ${emp.name} en ${dateStr}. Ranura vacía.`);
+                      console.warn(`No se pudo asignar turno de descanso (D/F) a ${emp.name} en ${dateStr}. Ranura vacía.`);
                  }
                  calculateFinalTotals(schedule, employees, absences); // Recalculate for next employee decision
              }
@@ -1043,7 +1039,7 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
     calculateFinalTotals(schedule, employees, absences);
 
     // Pass 3.5: Fill remaining nulls
-    console.log("Pase 3.5: Llenar NULOS restantes con C, D o F");
+    console.log("Pase 3.5: Llenar NULOS restantes con D o F");
     schedule.days.forEach(day => {
         const dateStr = day.date;
         employees.forEach(emp => {
@@ -1063,15 +1059,13 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
 
                 if (day.isHoliday) {
                     if (canWorkShift(emp, dateStr, 'F', schedule, employees)) assignShift(emp.id, dateStr, 'F', schedule);
-                } else if (canWorkShift(emp, dateStr, 'C', schedule, employees)) {
-                    assignShift(emp.id, dateStr, 'C', schedule);
                 } else if ((schedule.employeeTotals[emp.id]?.D || 0) < employeeDTargets[emp.id] && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                     assignShift(emp.id, dateStr, 'D', schedule);
                 } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                      assignShift(emp.id, dateStr, 'D', schedule);
                 }
                  else {
-                    console.warn(`Pase 3.5: Aún no se puede asignar D/C/F a ${emp.name} en ${dateStr}`);
+                    console.warn(`Pase 3.5: Aún no se puede asignar D/F a ${emp.name} en ${dateStr}`);
                 }
                 calculateFinalTotals(schedule, employees, absences); // Recalculate after each assignment in this critical pass
             }

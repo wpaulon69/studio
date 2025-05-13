@@ -15,8 +15,8 @@ export interface Employee {
   consecutiveWorkDays?: number; // Calculated based on history
 }
 
-export type ShiftType = "M" | "T" | "D" | "C" | "F" | "LM" | "LAO";
-export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "C", "F", "LM", "LAO"];
+export type ShiftType = "M" | "T" | "D" | "F" | "LM" | "LAO";
+export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "F", "LM", "LAO"];
 
 // Define the allowed shift types for fixed assignments, including 'D'
 export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D"];
@@ -47,7 +47,6 @@ export interface ScheduleDay {
     M: number;
     T: number;
     D: number;
-    C: number;
     F: number;
     LM: number;
     LAO: number;
@@ -62,7 +61,6 @@ export interface EmployeeTotals {
   freeSaturdays: number;
   freeSundays: number;
   F: number;
-  C: number;
   D: number;
   LM: number;
   LAO: number;
@@ -92,7 +90,6 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800", // #d4edda
   T: "bg-blue-100 text-blue-800", // #cce5ff
   D: "bg-gray-200 text-gray-700", // #e9ecef
-  C: "bg-orange-100 text-orange-800", 
   F: "bg-purple-100 text-purple-800", 
   LM: "bg-red-100 text-red-800", // #f8d7da
   LAO: "bg-pink-100 text-pink-800", 

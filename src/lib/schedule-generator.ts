@@ -15,7 +15,7 @@ import { es } from 'date-fns/locale'; // Import Spanish locale
 // --- Constants and Configuration ---
 const MAX_CONSECUTIVE_WORK_DAYS = 6;
 const MAX_CONSECUTIVE_NON_WORK_DAYS = 2; // Combined limit for D or F
-const REQUIRED_DD_WEEKENDS = 1; 
+const REQUIRED_DD_WEEKENDS = 1;
 const MIN_COVERAGE_TPT = 2;
 const MIN_COVERAGE_M = 1;
 const MIN_COVERAGE_T = 1;
@@ -63,7 +63,7 @@ function initializeSchedule(year: number, month: number, employees: Employee[], 
       isWeekend: isWeekend(date),
       isHoliday: holidays.some(h => h.date === dateStr),
       shifts: employees.reduce((acc, emp) => {
-        acc[emp.id] = null; 
+        acc[emp.id] = null;
         return acc;
       }, {} as { [employeeId: number]: ShiftType | null }),
       totals: { M: 0, T: 0, D: 0, F: 0, LM: 0, LAO: 0, TPT: 0 },
@@ -129,9 +129,9 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[]) {
             const { dayOfWeek: daysOfWeek, shift } = prefs.fixedWorkShift;
             if(Array.isArray(daysOfWeek) && shift) {
                 schedule.days.forEach(day => {
-                     if (day.shifts[employee.id] === null) { 
+                     if (day.shifts[employee.id] === null) {
                          const currentDate = parseISO(day.date);
-                         const currentDayOfWeek = getDay(currentDate); 
+                         const currentDayOfWeek = getDay(currentDate);
                          if (daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday) {
                              day.shifts[employee.id] = shift;
                          }
@@ -187,7 +187,7 @@ function getConsecutiveDaysOfTypeBefore(
 
     // Check history if streak continues before schedule start
     const history = employee.history || {};
-    const historyDates = Object.keys(history).sort().reverse(); 
+    const historyDates = Object.keys(history).sort().reverse();
 
     for (const histDateStr of historyDates) {
         if (format(currentDate, 'yyyy-MM-dd') !== histDateStr) {
@@ -201,7 +201,7 @@ function getConsecutiveDaysOfTypeBefore(
             if (isTargetType(shift)) {
                 consecutiveDays++;
             } else {
-                return consecutiveDays; 
+                return consecutiveDays;
             }
             currentDate = subDays(currentDate, 1);
         } catch (e) {
@@ -274,6 +274,7 @@ function canWorkShift(employee: Employee, dateStr: string, shift: ShiftType | nu
         } else {
              prevShift = employee.history?.[prevDateStr] || null;
         }
+         if (prevShift === 'T') return false; // Cannot work M after T
     }
     return true;
 }
@@ -585,7 +586,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
         const date1 = parseISO(day1.date);
         const date2 = parseISO(day2.date);
         if (!isValid(date1) || !isValid(date2)) continue;
-         if (getDay(date1) === 6 && getDay(date2) === 0) { 
+         if (getDay(date1) === 6 && getDay(date2) === 0) {
            if ((day1.shifts[emp.id] === 'D' || (day1.isHoliday && day1.shifts[emp.id] === 'F')) &&
                (day2.shifts[emp.id] === 'D' || (day2.isHoliday && day2.shifts[emp.id] === 'F'))) {
              ddWeekends++;
@@ -736,6 +737,55 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
         details: t_m_violations === 0 ? 'No se detectaron secuencias T->M inmediatas.' : `Potenciales Violaciones: ${t_m_violations} instancia(s) (${t_m_details.slice(0, 3).join(', ')}${t_m_violations > 3 ? '...' : ''})`,
     });
 
+    let compensatoryRestViolations = 0;
+    let compensatoryRestDetails: string[] = [];
+    schedule.days.forEach((day, dayIndex) => {
+        if (day.isHoliday) {
+            employees.forEach(emp => {
+                const shiftOnHoliday = day.shifts[emp.id];
+                if (shiftOnHoliday === 'M' || shiftOnHoliday === 'T') {
+                    const nextDay1Index = dayIndex + 1;
+                    const nextDay2Index = dayIndex + 2;
+                    if (nextDay1Index < schedule.days.length && nextDay2Index < schedule.days.length) {
+                        const nextDay1 = schedule.days[nextDay1Index];
+                        const nextDay2 = schedule.days[nextDay2Index];
+                        const dateNextDay1 = parseISO(nextDay1.date);
+                        const dateNextDay2 = parseISO(nextDay2.date);
+
+                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 &&
+                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) {
+                            
+                            let missedCompensatorySat = false;
+                            let missedCompensatorySun = false;
+
+                            if (nextDay1.shifts[emp.id] !== 'D' && nextDay1.shifts[emp.id] !== 'LAO' && nextDay1.shifts[emp.id] !== 'LM') {
+                                missedCompensatorySat = true;
+                            }
+                            if (nextDay2.shifts[emp.id] !== 'D' && nextDay2.shifts[emp.id] !== 'LAO' && nextDay2.shifts[emp.id] !== 'LM') {
+                                missedCompensatorySun = true;
+                            }
+
+                            if (missedCompensatorySat || missedCompensatorySun) {
+                                compensatoryRestViolations++;
+                                if (compensatoryRestDetails.length < 3) {
+                                    compensatoryRestDetails.push(`${emp.name} trabajó feriado ${format(parseISO(day.date), 'dd/MM', { locale: es })} y no tuvo D completo el finde sig.`);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+    results.push({
+        rule: `Flexible - Descanso Compensatorio Finde Post-Feriado Trabajado`,
+        passed: compensatoryRestViolations === 0,
+        details: compensatoryRestViolations === 0
+            ? 'Se otorgaron descansos compensatorios D en fines de semana post-feriado trabajado donde aplicó.'
+            : `${compensatoryRestViolations} instancia(s) de potencial falta de descanso compensatorio D en finde post-feriado trabajado: ${compensatoryRestDetails.join('; ')}${compensatoryRestViolations > 3 ? '...' : ''}`,
+    });
+
+
     let staffingDeviations = 0;
      schedule.days.forEach(day => {
         const { M, T } = day.totals;
@@ -749,7 +799,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
      })
       results.push({
           rule: `Flexible 4 - Dotación Objetivo Diaria (General)`,
-          passed: true, 
+          passed: true,
           details: staffingDeviations === 0 ? 'Todos los días cumplieron dotación objetivo.' : `${staffingDeviations} día(s) se desviaron de la dotación objetivo (Obj Día Lab: ${TARGET_M_WORKDAY}M/${TARGET_T}T, Finde/Fer: ${TARGET_M_WEEKEND_HOLIDAY}M/${TARGET_T}T).`,
       });
 
@@ -758,13 +808,13 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
          const empTotals = schedule.employeeTotals[emp.id];
          if (!empTotals) return;
 
-         if(emp.preferences?.fixedWorkShift) return; 
+         if(emp.preferences?.fixedWorkShift) return;
 
          const { M, T } = empTotals;
          const totalShifts = M + T;
          if (totalShifts > 0) {
              const diff = Math.abs(M - T);
-             const imbalanceThreshold = Math.max(3, Math.floor(totalShifts * 0.2)); 
+             const imbalanceThreshold = Math.max(3, Math.floor(totalShifts * 0.2));
              if (diff > imbalanceThreshold) {
                 balanceIssues++;
              }
@@ -772,7 +822,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
      });
        results.push({
            rule: `Flexible 5 - Balance Turnos M/T por Empleado (General)`,
-           passed: true, 
+           passed: true,
            details: balanceIssues === 0 ? 'Conteos M/T de empleados (sin turno fijo semanal) parecen balanceados.' : `${balanceIssues} empleado(s) muestran desbalance M/T potencial (diferencia > 3 o 20%).`,
        });
 
@@ -795,7 +845,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
              if (violations.length > 0) {
                 results.push({
                     rule: `Preferencia Flexible - ${emp.name}`,
-                    passed: true, 
+                    passed: true,
                     details: `Desajustes de Preferencia: ${violations.slice(0,2).join(', ')}${violations.length > 2 ? '...' : ''}`
                 });
             }
@@ -845,20 +895,21 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
              if (rule.startsWith("Prioridad 3")) return 3;
              if (rule.startsWith("Prioridad 4")) return 4;
              if (rule.startsWith("Prioridad 5")) return 5;
-             if (rule.startsWith("Flexible 1")) return 6; 
-             if (rule.startsWith("Flexible 5")) return 7; 
-             if (rule.startsWith("Flexible 4")) return 8; 
+             if (rule.startsWith("Flexible 1")) return 6;
+             if (rule.startsWith("Flexible - Descanso Compensatorio")) return 6.5;
+             if (rule.startsWith("Flexible 5")) return 7;
+             if (rule.startsWith("Flexible 4")) return 8;
              if (rule.startsWith("Preferencia Flexible")) return 9;
-             if (rule.startsWith("Flexible")) return 10; 
+             if (rule.startsWith("Flexible")) return 10;
              if (rule.startsWith("Info Generador")) return 12;
-             return 11; 
+             return 11;
          }
          const prioA = getPrio(a.rule);
          const prioB = getPrio(b.rule);
 
          if (prioA !== prioB) return prioA - prioB;
-          if (a.passed !== b.passed) return a.passed ? 1 : -1; 
-         return a.rule.localeCompare(b.rule); 
+          if (a.passed !== b.passed) return a.passed ? 1 : -1;
+         return a.rule.localeCompare(b.rule);
      });
 
   return results;
@@ -934,21 +985,21 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
          while (currentM < targetM) {
              const candidates = availableEmployees
                  .filter(e => canWorkShift(e, dateStr, 'M', schedule, employees))
-                 .sort((a,b) => (schedule.employeeTotals[a.id]?.M || 0) - (schedule.employeeTotals[b.id]?.M || 0)); 
+                 .sort((a,b) => (schedule.employeeTotals[a.id]?.M || 0) - (schedule.employeeTotals[b.id]?.M || 0));
              if (candidates.length === 0) break;
              assignShift(candidates[0].id, dateStr, 'M', schedule);
               if (day.shifts[candidates[0].id] === 'M') {
                 currentM++;
                 availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
-              } else { 
-                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id); 
+              } else {
+                availableEmployees = availableEmployees.filter(e => e.id !== candidates[0].id);
               }
          }
 
          while (currentT < targetT) {
              const candidates = availableEmployees
                  .filter(e => canWorkShift(e, dateStr, 'T', schedule, employees))
-                 .sort((a,b) => (schedule.employeeTotals[a.id]?.T || 0) - (schedule.employeeTotals[b.id]?.T || 0)); 
+                 .sort((a,b) => (schedule.employeeTotals[a.id]?.T || 0) - (schedule.employeeTotals[b.id]?.T || 0));
              if (candidates.length === 0) break;
              assignShift(candidates[0].id, dateStr, 'T', schedule);
              if (day.shifts[candidates[0].id] === 'T') {
@@ -960,6 +1011,49 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
          }
     });
     calculateFinalTotals(schedule, employees, absences);
+
+    // --- Pass 2.5: Compensatory Rest after Holiday Work ---
+    console.log("Iteración 2.5: Asignar Descanso Compensatorio Post-Feriado");
+    schedule.days.forEach((day, dayIndex) => {
+        if (day.isHoliday) {
+            employees.forEach(emp => {
+                const shiftOnHoliday = day.shifts[emp.id];
+                if (shiftOnHoliday === 'M' || shiftOnHoliday === 'T') {
+                    // Check for subsequent Saturday & Sunday
+                    const nextDay1Index = dayIndex + 1;
+                    const nextDay2Index = dayIndex + 2;
+
+                    if (nextDay1Index < schedule.days.length && nextDay2Index < schedule.days.length) {
+                        const nextDay1 = schedule.days[nextDay1Index];
+                        const nextDay2 = schedule.days[nextDay2Index];
+
+                        const dateNextDay1 = parseISO(nextDay1.date);
+                        const dateNextDay2 = parseISO(nextDay2.date);
+
+                        // Check if nextDay1 is Saturday and nextDay2 is Sunday
+                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 &&
+                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) {
+
+                            // Assign 'D' on Saturday if possible and not already LAO/LM
+                            if (nextDay1.shifts[emp.id] === null || (nextDay1.shifts[emp.id] !== 'LAO' && nextDay1.shifts[emp.id] !== 'LM')) {
+                                if (canWorkShift(emp, nextDay1.date, 'D', schedule, employees)) {
+                                    assignShift(emp.id, nextDay1.date, 'D', schedule);
+                                }
+                            }
+                            // Assign 'D' on Sunday if possible and not already LAO/LM
+                            if (nextDay2.shifts[emp.id] === null || (nextDay2.shifts[emp.id] !== 'LAO' && nextDay2.shifts[emp.id] !== 'LM')) {
+                                 if (canWorkShift(emp, nextDay2.date, 'D', schedule, employees)) {
+                                    assignShift(emp.id, nextDay2.date, 'D', schedule);
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    });
+    calculateFinalTotals(schedule, employees, absences);
+
 
     // --- Pass 3: Assign Rest Days (D, F), aiming for proportional D target ---
     console.log("Iteración 3: Asignar Descansos (D, F) apuntando a D objetivo proporcional");
@@ -974,14 +1068,14 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
              const needsDA = (schedule.employeeTotals[a.id]?.D || 0) < employeeDTargets[a.id];
              const needsDB = (schedule.employeeTotals[b.id]?.D || 0) < employeeDTargets[b.id];
 
-             if (needsDA && !needsDB) return -1; 
-             if (!needsDA && needsDB) return 1;  
+             if (needsDA && !needsDB) return -1;
+             if (!needsDA && needsDB) return 1;
 
              return (schedule.employeeTotals[a.id]?.D || 0) - (schedule.employeeTotals[b.id]?.D || 0);
          });
 
          employeesSortedForRest.forEach(emp => {
-             if (day.shifts[emp.id] === null) { 
+             if (day.shifts[emp.id] === null) {
                 const isOnLeaveFullMonth = absences.some(absenceRecord => {
                     if(absenceRecord.employeeId !== emp.id || !absenceRecord.startDate || !absenceRecord.endDate) return false;
                     try {
@@ -1003,13 +1097,13 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
                      // Prioritize 'D' if below target or generally
                      if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                           assignShift(emp.id, dateStr, 'D', schedule);
-                     } 
+                     }
                      // If D wasn't possible (e.g. consecutive limit), try F as an alternative non-working day
                      else if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
                         assignShift(emp.id, dateStr, 'F', schedule);
                      }
                  }
-                 calculateFinalTotals(schedule, employees, absences); 
+                 calculateFinalTotals(schedule, employees, absences);
              }
          });
      });
@@ -1069,7 +1163,7 @@ export function generateSchedule(
   const absencesForGeneration: Absence[] = JSON.parse(JSON.stringify(initialAbsences));
   const holidaysForGeneration: Holiday[] = JSON.parse(JSON.stringify(initialHolidays));
 
-  currentEmployeesState = employeesForGeneration; 
+  currentEmployeesState = employeesForGeneration;
 
   const startTime = performance.now();
   const schedule = initializeSchedule(year, month, employeesForGeneration, holidaysForGeneration);
@@ -1106,6 +1200,7 @@ export function generateSchedule(
              if (rule.startsWith("Prioridad 4")) return 4;
              if (rule.startsWith("Prioridad 5")) return 5;
              if (rule.startsWith("Flexible 1")) return 6;
+             if (rule.startsWith("Flexible - Descanso Compensatorio")) return 6.5;
              if (rule.startsWith("Flexible 5")) return 7;
              if (rule.startsWith("Flexible 4")) return 8;
              if (rule.startsWith("Preferencia Flexible")) return 9;
@@ -1122,5 +1217,3 @@ export function generateSchedule(
 
   return { schedule, report };
 }
-
-    

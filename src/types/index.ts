@@ -15,8 +15,8 @@ export interface Employee {
   consecutiveWorkDays?: number; // Calculated based on history
 }
 
-export type ShiftType = "M" | "T" | "D" | "F" | "LM" | "LAO";
-export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "F", "LM", "LAO"];
+export type ShiftType = "M" | "T" | "D" | "F" | "LM" | "LAO" | "C";
+export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "F", "LM", "LAO", "C"];
 
 // Define the allowed shift types for fixed assignments, including 'D'
 export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D"];
@@ -50,6 +50,7 @@ export interface ScheduleDay {
     F: number;
     LM: number;
     LAO: number;
+    C: number; // Added C
     TPT: number; // Total Personnel Turning (M+T)
   };
 }
@@ -64,6 +65,7 @@ export interface EmployeeTotals {
   D: number;
   LM: number;
   LAO: number;
+  C: number; // Added C
 }
 
 export interface Schedule {
@@ -90,9 +92,10 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800", // #d4edda
   T: "bg-blue-100 text-blue-800", // #cce5ff
   D: "bg-gray-200 text-gray-700", // #e9ecef
-  F: "bg-purple-100 text-purple-800", 
+  F: "bg-purple-100 text-purple-800",
   LM: "bg-red-100 text-red-800", // #f8d7da
-  LAO: "bg-pink-100 text-pink-800", 
+  LAO: "bg-pink-100 text-pink-800",
+  C: "bg-teal-100 text-teal-800", // Added C color
 };
 
 export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd

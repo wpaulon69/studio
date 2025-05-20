@@ -46,11 +46,11 @@ const MONTHS = [
 ];
 
 // Allow null for manual clearing
-const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES), z.literal('NULL')]); // 'NULL' string to represent null in select
+const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES as [string, ...string[]]), z.literal('NULL')]); // 'NULL' string to represent null in select
 
 const fixedAssignmentSchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha debe ser YYYY-MM-DD"),
-    shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS)
+    shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS as [string, ...string[]])
 });
 
 const employeePreferenceSchema = z.object({
@@ -58,7 +58,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
-        shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS)
+        shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS as [string, ...string[]])
     }).optional()
 });
 
@@ -93,8 +93,19 @@ export default function Home() {
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth() + 1); // Default to current month
-  const [selectedYear, setSelectedYear] = useState<number>(CURRENT_YEAR); // Default to current year
+
+  // State for month/year selection, initialized safely for SSR then updated on client
+  const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
+  const [selectedYear, setSelectedYear] = useState<number | null>(null);
+  const [isDateInitialized, setIsDateInitialized] = useState(false);
+
+  useEffect(() => {
+    const now = new Date();
+    setSelectedMonth(now.getMonth() + 1);
+    setSelectedYear(now.getFullYear());
+    setIsDateInitialized(true);
+  }, []);
+
 
   const [employees, setEmployees] = useState<Employee[]>(defaultEmployees.map(emp => ({...emp, preferences: emp.preferences || {}})));
   const [absences, setAbsences] = useState<Absence[]>(defaultAbsences);
@@ -227,6 +238,7 @@ export default function Home() {
 
   // --- History Input Handling ---
   const getPreviousMonthDates = useCallback(() => {
+    if (!selectedYear || !selectedMonth) return [];
     const firstDayCurrentMonth = new Date(selectedYear, selectedMonth - 1, 1);
     const lastDayPreviousMonth = subDays(firstDayCurrentMonth, 1);
     const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4); // Get last 5 days
@@ -251,6 +263,11 @@ export default function Home() {
 
   // --- Schedule Generation ---
   const handleGenerateSchedule = () => {
+    if (!isDateInitialized || selectedMonth === null || selectedYear === null) {
+        // Optionally, show a message to the user that date is not ready
+        console.warn("Month or year not initialized yet.");
+        return;
+    }
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
@@ -386,9 +403,13 @@ export default function Home() {
                     <div className="flex gap-4 w-full md:w-auto">
                         <div className="flex-1">
                             <Label htmlFor="month-select">Mes</Label>
-                            <Select value={selectedMonth.toString()} onValueChange={(value) => setSelectedMonth(parseInt(value))}>
+                            <Select 
+                                value={selectedMonth?.toString() || ""} 
+                                onValueChange={(value) => setSelectedMonth(parseInt(value))}
+                                disabled={!isDateInitialized}
+                            >
                                 <SelectTrigger id="month-select">
-                                    <SelectValue placeholder="Seleccionar mes" />
+                                    <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
                                 </SelectTrigger>
                                 <SelectContent>
                                     {MONTHS.map(m => (
@@ -399,9 +420,13 @@ export default function Home() {
                         </div>
                         <div className="flex-1">
                             <Label htmlFor="year-select">Año</Label>
-                            <Select value={selectedYear.toString()} onValueChange={(value) => setSelectedYear(parseInt(value))}>
+                            <Select 
+                                value={selectedYear?.toString() || ""} 
+                                onValueChange={(value) => setSelectedYear(parseInt(value))}
+                                disabled={!isDateInitialized}
+                            >
                                 <SelectTrigger id="year-select">
-                                <SelectValue placeholder="Select year" />
+                                <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
                                 </SelectTrigger>
                                 <SelectContent>
                                 {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
@@ -411,7 +436,7 @@ export default function Home() {
                             </Select>
                         </div>
                     </div>
-                    <Button onClick={handleGenerateSchedule} disabled={isLoading} className="w-full md:w-auto">
+                    <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized} className="w-full md:w-auto">
                         {isLoading ? 'Generando...' : 'Generar Horario'}
                     </Button>
                 </div>
@@ -776,7 +801,7 @@ export default function Home() {
                 <div className="text-center p-8"><div className="animate-spin rounded-full h-16 w-16 border-t-2 border-b-2 border-primary mx-auto"></div><p className="mt-4">Generando o recalculando horario...</p></div>
              )}
 
-            {!isLoading && schedule && (
+            {!isLoading && schedule && selectedMonth !== null && selectedYear !== null && (
                 <Card className="mb-8 overflow-x-auto shadow-md">
                 <CardHeader>
                     <div className="flex justify-between items-center">
@@ -892,3 +917,4 @@ export default function Home() {
     </div>
   );
 }
+

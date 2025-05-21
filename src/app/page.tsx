@@ -12,8 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { generateSchedule, calculateFinalTotals, validateSchedule } from '@/lib/schedule-generator'; // Import calculation and validation separately
-import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType } from '@/types';
+import { generateSchedule, calculateFinalTotals, validateSchedule } from '@/lib/schedule-generator';
+import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
@@ -34,8 +34,8 @@ const defaultEmployees: Employee[] = [
 ];
 
 
-const defaultAbsences: Absence[] = []; // Start empty
-const defaultHolidays: Holiday[] = []; // Start empty
+const defaultAbsences: Absence[] = [];
+const defaultHolidays: Holiday[] = [];
 
 const CURRENT_YEAR = new Date().getFullYear();
 const MONTHS = [
@@ -45,8 +45,7 @@ const MONTHS = [
     { value: 10, label: 'Octubre' }, { value: 11, label: 'Noviembre' }, { value: 12, label: 'Diciembre' }
 ];
 
-// Allow null for manual clearing
-const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES as [string, ...string[]]), z.literal('NULL')]); // 'NULL' string to represent null in select
+const shiftTypeSchema = z.union([z.enum(SHIFT_TYPES as [string, ...string[]]), z.literal('NULL')]);
 
 const fixedAssignmentSchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato de fecha debe ser YYYY-MM-DD"),
@@ -57,21 +56,20 @@ const employeePreferenceSchema = z.object({
     preferWeekendWork: z.boolean().optional(),
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
-        dayOfWeek: z.array(z.number().min(0).max(6)), // 0=Sunday, 6=Saturday
+        dayOfWeek: z.array(z.number().min(0).max(6)),
         shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS as [string, ...string[]])
     }).optional()
 });
 
 const employeeSchema = z.object({
-    id: z.number().optional(), // Optional for new employees
+    id: z.number().optional(),
     name: z.string().min(1, "Nombre es requerido"),
     eligibleWeekend: z.boolean(),
     preferences: employeePreferenceSchema.optional(),
-    // History is handled separately for now
 });
 
 const absenceSchema = z.object({
-    id: z.number().optional(), // For potential editing/deleting later
+    id: z.number().optional(),
     employeeId: z.number({required_error: "Debe seleccionar un empleado"}).min(1, "Debe seleccionar un empleado"),
     type: z.enum(["LAO", "LM"]),
     startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
@@ -89,15 +87,21 @@ const holidaySchema = z.object({
 
 // --- Component ---
 export default function Home() {
-  const [displayMode, setDisplayMode] = useState<'config' | 'viewing'>('config'); // 'config' or 'viewing'
+  const [displayMode, setDisplayMode] = useState<'config' | 'viewing'>('config');
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // State for month/year selection, initialized safely for SSR then updated on client
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [isDateInitialized, setIsDateInitialized] = useState(false);
+
+  // Target Staffing State
+  const [targetMWorkday, setTargetMWorkday] = useState<number>(3);
+  const [targetTWorkday, setTargetTWorkday] = useState<number>(1);
+  const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
+  const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
+
 
   useEffect(() => {
     const now = new Date();
@@ -120,7 +124,6 @@ export default function Home() {
   const [editingHoliday, setEditingHoliday] = useState<Holiday | null>(null);
 
 
-  // --- Form Hooks ---
     const employeeForm = useForm<z.infer<typeof employeeSchema>>({
         resolver: zodResolver(employeeSchema),
         defaultValues: { name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined } },
@@ -137,7 +140,6 @@ export default function Home() {
         defaultValues: { date: '', description: '' },
     });
 
-  // --- Data Management Functions ---
 
   const handleAddEmployee = (data: z.infer<typeof employeeSchema>) => {
     setEmployees(prev => [...prev, { ...data, id: Date.now(), history: {}, preferences: data.preferences || {} }]);
@@ -236,18 +238,17 @@ export default function Home() {
   };
 
 
-  // --- History Input Handling ---
   const getPreviousMonthDates = useCallback(() => {
     if (!selectedYear || !selectedMonth) return [];
     const firstDayCurrentMonth = new Date(selectedYear, selectedMonth - 1, 1);
     const lastDayPreviousMonth = subDays(firstDayCurrentMonth, 1);
-    const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4); // Get last 5 days
+    const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4); 
 
     const dates: string[] = [];
     for (let i = 0; i < 5; i++) {
         dates.push(format(addDays(firstDayPreviousMonthRelevant, i), 'yyyy-MM-dd'));
     }
-    return dates.sort().reverse(); // Most recent first
+    return dates.sort().reverse();
   }, [selectedYear, selectedMonth]);
 
   const handleHistoryChange = (employeeId: number, date: string, value: string) => {
@@ -261,10 +262,8 @@ export default function Home() {
       }));
   };
 
-  // --- Schedule Generation ---
   const handleGenerateSchedule = () => {
     if (!isDateInitialized || selectedMonth === null || selectedYear === null) {
-        // Optionally, show a message to the user that date is not ready
         console.warn("Month or year not initialized yet.");
         return;
     }
@@ -290,6 +289,13 @@ export default function Home() {
          setIsLoading(false);
          return;
      }
+    
+    const currentTargetStaffing: TargetStaffing = {
+        workdayMorning: targetMWorkday,
+        workdayAfternoon: targetTWorkday,
+        weekendHolidayMorning: targetMWeekendHoliday,
+        weekendHolidayAfternoon: targetTWeekendHoliday,
+    };
 
     setTimeout(() => {
       try {
@@ -298,7 +304,8 @@ export default function Home() {
           selectedMonth,
           JSON.parse(JSON.stringify(employeesWithHistory)),
           JSON.parse(JSON.stringify(absences)),
-          JSON.parse(JSON.stringify(holidays))
+          JSON.parse(JSON.stringify(holidays)),
+          currentTargetStaffing
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -311,7 +318,6 @@ export default function Home() {
     }, 50);
   };
 
-  // --- Manual Schedule Editing ---
     const handleManualShiftChange = (employeeId: number, date: string, newShiftValue: string | null) => {
         if (!schedule) return;
 
@@ -325,17 +331,22 @@ export default function Home() {
         }
     };
 
-    // --- Recalculate & Revalidate ---
     const handleRecalculate = () => {
         if (!schedule) return;
         setIsLoading(true);
         setReport([]);
          const scheduleToRecalculate = JSON.parse(JSON.stringify(schedule));
+         const currentTargetStaffing: TargetStaffing = {
+            workdayMorning: targetMWorkday,
+            workdayAfternoon: targetTWorkday,
+            weekendHolidayMorning: targetMWeekendHoliday,
+            weekendHolidayAfternoon: targetTWeekendHoliday,
+        };
 
          setTimeout(() => {
              try {
                 calculateFinalTotals(scheduleToRecalculate, employees, absences);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays);
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing);
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -440,6 +451,33 @@ export default function Home() {
                         {isLoading ? 'Generando...' : 'Generar Horario'}
                     </Button>
                 </div>
+                
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div>
+                                <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
+                                <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                            <div>
+                                <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
+                                <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                            <div>
+                                <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
+                                <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                            <div>
+                                <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
+                                <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <Card>
@@ -917,4 +955,3 @@ export default function Home() {
     </div>
   );
 }
-

@@ -50,7 +50,7 @@ export interface ScheduleDay {
     F: number;
     LM: number;
     LAO: number;
-    C: number; // Added C
+    C: number;
     TPT: number; // Total Personnel Turning (M+T)
   };
 }
@@ -65,7 +65,7 @@ export interface EmployeeTotals {
   D: number;
   LM: number;
   LAO: number;
-  C: number; // Added C
+  C: number;
 }
 
 export interface Schedule {
@@ -95,7 +95,14 @@ export const SHIFT_COLORS: Record<ShiftType, string> = {
   F: "bg-purple-100 text-purple-800",
   LM: "bg-red-100 text-red-800", // #f8d7da
   LAO: "bg-pink-100 text-pink-800",
-  C: "bg-teal-100 text-teal-800", // Added C color
+  C: "bg-teal-100 text-teal-800",
 };
 
 export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd
+
+export interface TargetStaffing {
+  workdayMorning: number;
+  workdayAfternoon: number;
+  weekendHolidayMorning: number;
+  weekendHolidayAfternoon: number;
+}

@@ -9,6 +9,7 @@ import type {
   ShiftType,
   ValidationResult,
   EmployeeTotals,
+  TargetStaffing,
 } from '@/types';
 import { differenceInDays, format, parseISO, addDays, getDay, isWeekend, startOfMonth, endOfMonth, getDate, subDays, isValid, getDaysInMonth as getNativeDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale'; // Import Spanish locale
@@ -20,12 +21,6 @@ const REQUIRED_DD_WEEKENDS = 1; // Or D/C, C/D, C/C or F/F if holiday
 const MIN_COVERAGE_TPT = 2;
 const MIN_COVERAGE_M = 1;
 const MIN_COVERAGE_T = 1;
-
-// Target staffing levels (flexible)
-const TARGET_M_WORKDAY = 3;
-const TARGET_M_WEEKEND_HOLIDAY = 2;
-const TARGET_T = 1;
-
 
 // --- Helper Functions ---
 
@@ -245,14 +240,14 @@ function canWorkShift(
             const prevDate = subDays(parseISO(dateStr), 1);
             const prevDateStr = format(prevDate, 'yyyy-MM-dd');
             const prevDaySchedule = schedule.days.find(d => d.date === prevDateStr);
-            let prevShift: ShiftType | null = null;
+            let prevShiftVal: ShiftType | null = null;
 
             if (prevDaySchedule) {
-                prevShift = prevDaySchedule.shifts[employee.id];
+                prevShiftVal = prevDaySchedule.shifts[employee.id];
             } else {
-                prevShift = employee.history?.[prevDateStr] || null;
+                prevShiftVal = employee.history?.[prevDateStr] || null;
             }
-            if (prevShift === 'T') return false;
+            if (prevShiftVal === 'T') return false;
         }
     }
 
@@ -266,7 +261,6 @@ function canWorkShift(
     if (shift === 'D' && day.isHoliday) {
         return false;
     }
-    // 'C' should be allowed on a holiday. 'F' is the typical holiday off day.
 
     const prefs = employee.preferences || {};
     if (prefs.fixedAssignments?.some(a => {
@@ -450,7 +444,7 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
 }
 
 
-export function validateSchedule(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[], reportAccumulator?: ValidationResult[]): ValidationResult[] {
+export function validateSchedule(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[], targetStaffing: TargetStaffing, reportAccumulator?: ValidationResult[]): ValidationResult[] {
   const results: ValidationResult[] = reportAccumulator || [];
   const employeeMap = new Map(employees.map(e => [e.id, e]));
   const baseWeekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
@@ -757,14 +751,14 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
                       const prevDate = subDays(parseISO(currentDayDateStr), 1);
                       const prevDateStr = format(prevDate, 'yyyy-MM-dd');
                       const prevDaySchedule = schedule.days.find(d => d.date === prevDateStr);
-                      let prevShift: ShiftType | null = null;
+                      let prevShiftVal: ShiftType | null = null;
                       if (prevDaySchedule) {
-                          prevShift = prevDaySchedule.shifts[emp.id];
+                          prevShiftVal = prevDaySchedule.shifts[emp.id];
                       } else {
-                          prevShift = emp.history?.[prevDateStr] || null;
+                          prevShiftVal = emp.history?.[prevDateStr] || null;
                       }
 
-                     if (prevShift === 'T') {
+                     if (prevShiftVal === 'T') {
                         t_m_violations++;
                         if (t_m_details.length < 3) t_m_details.push(`${emp.name} en ${format(parseISO(currentDayDateStr), 'dd/MM', { locale: es })}`);
                      }
@@ -833,17 +827,17 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
      schedule.days.forEach(day => {
         const { M, T } = day.totals;
         const isWorkDay = !day.isHoliday && !day.isWeekend;
-        const targetM = isWorkDay ? TARGET_M_WORKDAY : TARGET_M_WEEKEND_HOLIDAY;
-        const targetT = TARGET_T;
+        const targetM = isWorkDay ? targetStaffing.workdayMorning : targetStaffing.weekendHolidayMorning;
+        const targetTValue = isWorkDay ? targetStaffing.workdayAfternoon : targetStaffing.weekendHolidayAfternoon;
 
-         if(M !== targetM || T !== targetT) {
+         if(M !== targetM || T !== targetTValue) {
              staffingDeviations++;
          }
      })
       results.push({
           rule: `Flexible 4 - Dotación Objetivo Diaria (General)`,
           passed: true,
-          details: staffingDeviations === 0 ? 'Todos los días cumplieron dotación objetivo.' : `${staffingDeviations} día(s) se desviaron de la dotación objetivo (Obj Día Lab: ${TARGET_M_WORKDAY}M/${TARGET_T}T, Finde/Fer: ${TARGET_M_WEEKEND_HOLIDAY}M/${TARGET_T}T).`,
+          details: staffingDeviations === 0 ? 'Todos los días cumplieron dotación objetivo.' : `${staffingDeviations} día(s) se desviaron de la dotación objetivo (Obj Día Lab: ${targetStaffing.workdayMorning}M/${targetStaffing.workdayAfternoon}T, Finde/Fer: ${targetStaffing.weekendHolidayMorning}M/${targetStaffing.weekendHolidayAfternoon}T).`,
       });
 
     let balanceIssues = 0;
@@ -969,7 +963,7 @@ export function validateSchedule(schedule: Schedule, employees: Employee[], abse
 
 let currentEmployeesState: Employee[] = [];
 
-function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[], report: ValidationResult[]) {
+function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absences: Absence[], holidays: Holiday[], targetStaffing: TargetStaffing, report: ValidationResult[]) {
     const baseWeekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
     currentEmployeesState = employees;
 
@@ -1065,11 +1059,20 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
             
             while (day.totals.TPT < MIN_COVERAGE_TPT) {
                 let assignedInRelaxedTPTIteration = false;
-                if (assignShiftIfPossible('M', true)) {
-                    assignedInRelaxedTPTIteration = true;
-                } else if (assignShiftIfPossible('T', true)) {
-                    assignedInRelaxedTPTIteration = true;
-                }
+                 if (day.totals.M <= day.totals.T) { // Prioritize M if it's lower or equal
+                    if (assignShiftIfPossible('M', true)) {
+                        assignedInRelaxedTPTIteration = true;
+                    } else if (assignShiftIfPossible('T', true)) {
+                        assignedInRelaxedTPTIteration = true;
+                    }
+                 } else { // Prioritize T if M is higher
+                    if (assignShiftIfPossible('T', true)) {
+                        assignedInRelaxedTPTIteration = true;
+                    } else if (assignShiftIfPossible('M', true)) {
+                        assignedInRelaxedTPTIteration = true;
+                    }
+                 }
+
 
                 if (!assignedInRelaxedTPTIteration) {
                     console.error(`Pass 1 (${dateStr}): IMPOSIBLE cumplir TPT >= ${MIN_COVERAGE_TPT} incluso con restricciones relajadas. Actual TPT: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}.`);
@@ -1097,8 +1100,9 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
         const dateStr = day.date;
         calculateDayTotals(day);
         
-        const targetM = day.isWeekend || day.isHoliday ? TARGET_M_WEEKEND_HOLIDAY : TARGET_M_WORKDAY;
-        const targetT = TARGET_T;
+        const targetM = day.isWeekend || day.isHoliday ? targetStaffing.weekendHolidayMorning : targetStaffing.workdayMorning;
+        const targetTValue = day.isWeekend || day.isHoliday ? targetStaffing.weekendHolidayAfternoon : targetStaffing.workdayAfternoon;
+
         let availableEmployees = employees.filter(e => day.shifts[e.id] === null);
 
         const assignToTarget = (shiftType: 'M' | 'T', currentCount: number, targetCount: number) => {
@@ -1127,7 +1131,7 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
             return count;
         }
         assignToTarget('M', day.totals.M, targetM);
-        assignToTarget('T', day.totals.T, targetT);
+        assignToTarget('T', day.totals.T, targetTValue);
     });
     calculateFinalTotals(schedule, employees, absences);
 
@@ -1206,15 +1210,15 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
                  if (day.isHoliday) {
                      if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
                         assignShift(emp.id, dateStr, 'F', schedule);
-                     } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
+                     } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) { // Fallback to D if F isn't possible (e.g., MAX_CONSECUTIVE_NON_WORK)
                         assignShift(emp.id, dateStr, 'D', schedule);
                      }
                  } else {
                      if ((schedule.employeeTotals[emp.id]?.D || 0) < employeeDTargets[emp.id] && canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                           assignShift(emp.id, dateStr, 'D', schedule);
-                     } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
+                     } else if (canWorkShift(emp, dateStr, 'D', schedule, employees)) { // If D target is met, still try D if possible
                         assignShift(emp.id, dateStr, 'D', schedule);
-                     } else if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
+                     } else if (canWorkShift(emp, dateStr, 'F', schedule, employees)) { // Fallback to F (e.g. if max D met, but F still allowed)
                         assignShift(emp.id, dateStr, 'F', schedule);
                      }
                  }
@@ -1253,7 +1257,7 @@ function iterativeAssignShifts(schedule: Schedule, employees: Employee[], absenc
                     if (canWorkShift(emp, dateStr, 'D', schedule, employees)) {
                         assignShift(emp.id, dateStr, 'D', schedule);
                         assignedInFill = day.shifts[emp.id] === 'D';
-                    } else if (canWorkShift(emp, dateStr, 'F', schedule, employees)) {
+                    } else if (canWorkShift(emp, dateStr, 'F', schedule, employees)) { // Try F again if D failed
                         assignShift(emp.id, dateStr, 'F', schedule);
                         assignedInFill = day.shifts[emp.id] === 'F';
                     }
@@ -1277,10 +1281,11 @@ export function generateSchedule(
   month: number,
   initialEmployees: Employee[],
   initialAbsences: Absence[],
-  initialHolidays: Holiday[]
+  initialHolidays: Holiday[],
+  targetStaffing: TargetStaffing
 ): { schedule: Schedule; report: ValidationResult[] } {
 
-  console.log("Iniciando Generación de Horario para", { year, month });
+  console.log("Iniciando Generación de Horario para", { year, month, targetStaffing });
   const employeesForGeneration: Employee[] = JSON.parse(JSON.stringify(initialEmployees));
   const absencesForGeneration: Absence[] = JSON.parse(JSON.stringify(initialAbsences));
   const holidaysForGeneration: Holiday[] = JSON.parse(JSON.stringify(initialHolidays));
@@ -1302,14 +1307,14 @@ export function generateSchedule(
 
 
   console.log("Iniciando pases de asignación iterativa...");
-  iterativeAssignShifts(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, report);
+  iterativeAssignShifts(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, report);
   console.log("Pases de asignación iterativa finalizados.");
 
   console.log("Calculando totales finales post-iteración...");
   calculateFinalTotals(schedule, employeesForGeneration, absencesForGeneration);
 
   console.log("Validando horario final...");
-  const finalReport = validateSchedule(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, report);
+  const finalReport = validateSchedule(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, report);
   const endTime = performance.now();
   console.log(`Generación de horario completada en ${(endTime - startTime).toFixed(2)} ms`);
 

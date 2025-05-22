@@ -17,7 +17,8 @@ import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType,
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
-import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react'; // Added Download & Upload icon
+import { es } from 'date-fns/locale';
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react';
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -58,7 +59,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)),
-        shift: z.enum([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'] as [string, ...string[]]) // Include D here
+        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'])) as [string, ...string[]])
     }).optional()
 });
 
@@ -518,7 +519,7 @@ export default function Home() {
         const date = parseISO(day.date);
         if (!isValid(date)) throw new Error('Invalid date');
         const dayOfMonth = format(date, 'd');
-        const dayOfWeek = format(date, 'eee');
+        const dayOfWeek = format(date, 'eee', { locale: es });
         return { dayOfMonth, dayOfWeek, isWeekend: day.isWeekend, isHoliday: day.isHoliday };
       } catch (e) {
         console.error(`Error parsing date: ${day.date}`, e);
@@ -551,6 +552,7 @@ export default function Home() {
     ];
 
      const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
+     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D']));
 
 
   return (
@@ -745,7 +747,7 @@ export default function Home() {
                                                         >
                                                             <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
-                                                                {[...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'].map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                {weeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                             </SelectContent>
                                                         </Select>
                                                         <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
@@ -1121,3 +1123,4 @@ export default function Home() {
   );
 }
 
+    

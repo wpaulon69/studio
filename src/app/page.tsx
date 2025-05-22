@@ -17,7 +17,7 @@ import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType,
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
-import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download } from 'lucide-react'; // Added Download icon
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -327,7 +327,7 @@ export default function Home() {
         if (dayIndex !== -1) {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
             setSchedule(updatedSchedule);
-            setReport([]);
+            setReport([]); // Clear report as it's now potentially invalid
         }
     };
 
@@ -357,6 +357,48 @@ export default function Home() {
             }
          }, 50)
     }
+
+  const exportScheduleToCSV = () => {
+    if (!schedule || !employees || selectedMonth === null || selectedYear === null) return;
+
+    const monthName = MONTHS.find(m => m.value === selectedMonth)?.label.toUpperCase() || 'MesDesconocido';
+    const fileName = `horario_${monthName}_${selectedYear}.csv`;
+
+    let csvContent = "data:text/csv;charset=utf-8,";
+
+    // Headers
+    const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
+    const headerRow = ["Empleado", "Total D", "Total M", "Total T", ...dayNumbers].join(",");
+    csvContent += headerRow + "\r\n";
+
+    // Employee Rows
+    employees.forEach(emp => {
+        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0 };
+        const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
+        const employeeRow = [emp.name, totals.D, totals.M, totals.T, shifts].join(",");
+        csvContent += employeeRow + "\r\n";
+    });
+
+    // Separator
+    csvContent += "\r\n"; 
+
+    // Daily Totals Rows
+    const dailyTotalsM = schedule.days.map(day => day.totals.M).join(",");
+    const dailyTotalsT = schedule.days.map(day => day.totals.T).join(",");
+    const dailyTotalsTPT = schedule.days.map(day => day.totals.TPT).join(",");
+
+    csvContent += ["Total Mañana (TM)", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", fileName);
+    document.body.appendChild(link); 
+    link.click();
+    document.body.removeChild(link);
+};
 
 
   const getDayHeaders = useMemo(() => {
@@ -850,6 +892,9 @@ export default function Home() {
                          <div className="flex gap-2">
                             <Button variant="outline" onClick={() => setDisplayMode('config')}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
+                             <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
+                                <Download className="mr-2 h-4 w-4" /> Exportar a CSV
+                             </Button>
                          </div>
                     </div>
                 </CardHeader>
@@ -955,3 +1000,4 @@ export default function Home() {
     </div>
   );
 }
+

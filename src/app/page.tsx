@@ -17,10 +17,11 @@ import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType,
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
-import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download } from 'lucide-react'; // Added Download icon
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react'; // Added Download & Upload icon
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
+import { useToast } from "@/hooks/use-toast";
 
 // --- Initial Data (Now defaults, user can modify) ---
 const defaultEmployees: Employee[] = [
@@ -57,7 +58,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)),
-        shift: z.enum(ALLOWED_FIXED_ASSIGNMENT_SHIFTS as [string, ...string[]])
+        shift: z.enum([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'] as [string, ...string[]]) // Include D here
     }).optional()
 });
 
@@ -101,6 +102,7 @@ export default function Home() {
   const [targetTWorkday, setTargetTWorkday] = useState<number>(1);
   const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
   const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
+  const { toast } = useToast();
 
 
   useEffect(() => {
@@ -248,7 +250,7 @@ export default function Home() {
     for (let i = 0; i < 5; i++) {
         dates.push(format(addDays(firstDayPreviousMonthRelevant, i), 'yyyy-MM-dd'));
     }
-    return dates.sort().reverse();
+    return dates.sort(); // Ensure chronological order for mapping from CSV
   }, [selectedYear, selectedMonth]);
 
   const handleHistoryChange = (employeeId: number, date: string, value: string) => {
@@ -260,6 +262,122 @@ export default function Home() {
               [date]: shift
           }
       }));
+  };
+
+  const handleImportHistoryFromCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        toast({ title: "Error", description: "No se pudo leer el archivo.", variant: "destructive" });
+        return;
+      }
+
+      try {
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== ''); // Filter out empty lines
+        if (lines.length < 2) {
+            throw new Error("El archivo CSV está vacío o no tiene datos de empleados.");
+        }
+
+        const header = lines[0].split(',');
+        const employeeNameIndex = header.findIndex(h => h.trim().toLowerCase() === 'empleado');
+        if (employeeNameIndex === -1) {
+          throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
+        }
+        
+        const firstDayColumnIndex = 4; // Shifts start after "Empleado", "Total D", "Total M", "Total T"
+
+        const newHistoryInputsState: { [employeeId: number]: { [date: string]: ShiftType | null } } = JSON.parse(JSON.stringify(historyInputs));
+        const previousDatesForHistory = getPreviousMonthDates(); 
+
+        if (previousDatesForHistory.length === 0) {
+            toast({ title: "Error", description: "No se pudieron determinar las fechas del mes anterior para el historial.", variant: "destructive"});
+            return;
+        }
+        
+        let employeesFoundInCsv = 0;
+        let employeesMatchedAndUpdated = 0;
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i];
+          const cells = line.split(',');
+          const employeeNameFromCSV = cells[employeeNameIndex]?.trim();
+
+          if (!employeeNameFromCSV || 
+              employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
+              employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
+              employeeNameFromCSV.toLowerCase().startsWith("total personal")) {
+            break; 
+          }
+          
+          employeesFoundInCsv++;
+          const employeeInApp = employees.find(emp => emp.name.trim().toLowerCase() === employeeNameFromCSV.toLowerCase());
+
+          if (employeeInApp) {
+            const dailyShiftsFromCSV = cells.slice(firstDayColumnIndex);
+            
+            // Get the last 'N' shifts from CSV, where N is the number of history dates we need (max 5)
+            const numHistoryDaysToTake = previousDatesForHistory.length;
+            const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
+            
+            if (relevantShiftsFromCSV.length > 0) {
+                employeesMatchedAndUpdated++;
+                if (!newHistoryInputsState[employeeInApp.id]) {
+                    newHistoryInputsState[employeeInApp.id] = {};
+                }
+
+                previousDatesForHistory.forEach((dateStr, index) => {
+                    // Map the shifts from CSV (last N days) to the N previous month dates
+                    // The CSV's last N days map to the N history dates.
+                    // relevantShiftsFromCSV[0] is the (N)th last day in CSV, maps to previousDatesForHistory[0]
+                    if (index < relevantShiftsFromCSV.length) {
+                        const shiftValue = relevantShiftsFromCSV[index]?.trim();
+                        if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
+                            newHistoryInputsState[employeeInApp.id][dateStr] = shiftValue as ShiftType;
+                        } else if (shiftValue === '' || shiftValue === '-') {
+                            newHistoryInputsState[employeeInApp.id][dateStr] = null;
+                        } else if (shiftValue) {
+                            console.warn(`Turno inválido '${shiftValue}' para ${employeeNameFromCSV} en CSV. Se ignora para fecha ${dateStr}.`);
+                        }
+                    }
+                });
+            } else {
+                 console.warn(`No se encontraron suficientes columnas de turnos en el CSV para ${employeeNameFromCSV} para los ${numHistoryDaysToTake} días de historial.`);
+            }
+          } else {
+            console.warn(`Empleado '${employeeNameFromCSV}' del CSV no encontrado en la lista actual. Se ignora su historial.`);
+          }
+        }
+        
+        setHistoryInputs(newHistoryInputsState);
+        if (employeesMatchedAndUpdated > 0) {
+            toast({ title: "Importación Exitosa", description: `Historial actualizado para ${employeesMatchedAndUpdated} empleado(s) basado en ${employeesFoundInCsv} empleado(s) leídos del CSV.` });
+        } else if (employeesFoundInCsv > 0) {
+             toast({ title: "Importación Parcial", description: `Se leyeron ${employeesFoundInCsv} empleado(s) del CSV, pero ninguno coincidió o tuvo datos de historial válidos para actualizar.`, variant: "default" });
+        } else {
+            toast({ title: "Sin Datos", description: "No se encontraron datos de empleados válidos en el CSV para importar historial.", variant: "default" });
+        }
+
+      } catch (error) {
+        console.error("Error importando CSV:", error);
+        toast({ title: "Error de Importación", description: error instanceof Error ? error.message : "Ocurrió un error procesando el archivo CSV.", variant: "destructive" });
+      }
+    };
+
+    reader.onerror = () => {
+      toast({ title: "Error", description: "No se pudo leer el archivo.", variant: "destructive" });
+    };
+
+    reader.readAsText(file);
+
+    if (event.target) {
+      event.target.value = '';
+    }
   };
 
   const handleGenerateSchedule = () => {
@@ -275,7 +393,7 @@ export default function Home() {
     const employeesWithHistory = employees.map(emp => ({
       ...emp,
       history: historyInputs[emp.id] || {},
-      consecutiveWorkDays: 0
+      consecutiveWorkDays: 0 // This will be recalculated by the generator
     }));
 
 
@@ -327,7 +445,7 @@ export default function Home() {
         if (dayIndex !== -1) {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
             setSchedule(updatedSchedule);
-            setReport([]); // Clear report as it's now potentially invalid
+            setReport([]); 
         }
     };
 
@@ -366,26 +484,18 @@ export default function Home() {
 
     let csvContent = "data:text/csv;charset=utf-8,";
 
-    // Headers
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
     const headerRow = ["Empleado", "Total D", "Total M", "Total T", ...dayNumbers].join(",");
     csvContent += headerRow + "\r\n";
 
-    // Employee Rows
     employees.forEach(emp => {
-        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0 };
+        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
         const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
         const employeeRow = [emp.name, totals.D, totals.M, totals.T, shifts].join(",");
         csvContent += employeeRow + "\r\n";
     });
 
-    // Separator
     csvContent += "\r\n"; 
-
-    // Daily Totals Rows
-    const dailyTotalsM = schedule.days.map(day => day.totals.M).join(",");
-    const dailyTotalsT = schedule.days.map(day => day.totals.T).join(",");
-    const dailyTotalsTPT = schedule.days.map(day => day.totals.TPT).join(",");
 
     csvContent += ["Total Mañana (TM)", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
     csvContent += ["Total Tarde (TT)", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
@@ -489,7 +599,7 @@ export default function Home() {
                             </Select>
                         </div>
                     </div>
-                    <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized} className="w-full md:w-auto">
+                    <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="w-full md:w-auto">
                         {isLoading ? 'Generando...' : 'Generar Horario'}
                     </Button>
                 </div>
@@ -619,7 +729,7 @@ export default function Home() {
                                                                             const newDays = checked
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? 'M';
+                                                                            const currentShift = field.value?.shift ?? 'M'; // Default to 'M' if undefined
                                                                             field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                         }}
                                                                     />
@@ -635,7 +745,7 @@ export default function Home() {
                                                         >
                                                             <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
-                                                                {ALLOWED_FIXED_ASSIGNMENT_SHIFTS.filter(s => s === 'M' || s === 'T' || s === 'D').map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                {[...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'].map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                             </SelectContent>
                                                         </Select>
                                                         <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
@@ -674,10 +784,20 @@ export default function Home() {
                                 </ul>
                                 <div className="mt-4 space-y-4 border-t pt-4">
                                     <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
+                                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2">
+                                        <Upload className="mr-2 h-4 w-4" /> Importar Historial CSV
+                                    </Button>
+                                    <Input
+                                      type="file"
+                                      id="csvImportInput"
+                                      className="hidden"
+                                      accept=".csv"
+                                      onChange={handleImportHistoryFromCSV}
+                                    />
                                     {employees.map(emp => (
                                         <div key={`hist-${emp.id}`} className="space-y-1">
                                             <p className="text-sm font-medium">{emp.name}</p>
-                                            <div className="grid grid-cols-3 gap-2">
+                                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                                                 {getPreviousMonthDates().map(dateStr => (
                                                     <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
                                                         <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>

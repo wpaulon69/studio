@@ -24,15 +24,10 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useToast } from "@/hooks/use-toast";
 
-// --- Initial Data (Now defaults, user can modify) ---
-const defaultEmployees: Employee[] = [
-    { id: 1, name: 'Rios', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 2, name: 'Molina', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 3, name: 'Montu', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 4, name: 'Cardozo', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 5, name: 'Garavaglia', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 6, name: 'Forni', eligibleWeekend: true, preferences: {}, history: {} },
-    { id: 7, name: 'Alamo', eligibleWeekend: false, preferences: { fixedWorkShift: { dayOfWeek: [1, 2, 3, 4, 5], shift: 'M' } }, history: {} }
+// --- Initial Data (Now defaults, user can modify or import) ---
+const defaultInitialEmployees: Employee[] = [
+    // This list can be initially empty or have some defaults,
+    // but will be overwritten by CSV import if that feature is used.
 ];
 
 
@@ -89,7 +84,7 @@ const holidaySchema = z.object({
 
 // Helper function for holiday date validation
 function isHolidayDateValid(dateStr: string, currentYear: number | null, currentMonth: number | null): boolean {
-    if (!currentYear || !currentMonth) return false; 
+    if (!currentYear || !currentMonth) return false;
     try {
         const holidayDate = parseISO(dateStr);
         if (!isValid(holidayDate)) return false;
@@ -144,7 +139,7 @@ export default function Home() {
   }, []);
 
 
-  const [employees, setEmployees] = useState<Employee[]>(defaultEmployees.map(emp => ({...emp, preferences: emp.preferences || {}})));
+  const [employees, setEmployees] = useState<Employee[]>(defaultInitialEmployees.map(emp => ({...emp, preferences: emp.preferences || {}})));
   const [absences, setAbsences] = useState<Absence[]>(defaultAbsences);
   const [holidays, setHolidays] = useState<Holiday[]>(defaultHolidays);
   const [historyInputs, setHistoryInputs] = useState<{ [employeeId: number]: { [date: string]: ShiftType | null } }>({});
@@ -190,7 +185,7 @@ export default function Home() {
 
   const handleDeleteEmployee = (id: number) => {
     setEmployees(prev => prev.filter(emp => emp.id !== id));
-    setAbsences(prev => prev.filter(a => a.employeeId !== id));
+    setAbsences(prev => prev.filter(a => a.employeeId !== id)); // Also remove absences for deleted employee
     setHistoryInputs(prev => {
         const newHist = {...prev};
         delete newHist[id];
@@ -311,13 +306,13 @@ export default function Home() {
     if (!selectedYear || !selectedMonth) return [];
     const firstDayCurrentMonth = new Date(selectedYear, selectedMonth - 1, 1);
     const lastDayPreviousMonth = subDays(firstDayCurrentMonth, 1);
-    const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4); 
+    const firstDayPreviousMonthRelevant = subDays(lastDayPreviousMonth, 4);
 
     const dates: string[] = [];
     for (let i = 0; i < 5; i++) {
         dates.push(format(addDays(firstDayPreviousMonthRelevant, i), 'yyyy-MM-dd'));
     }
-    return dates.sort(); 
+    return dates.sort();
   }, [selectedYear, selectedMonth]);
 
   const handleHistoryChange = (employeeId: number, date: string, value: string) => {
@@ -346,7 +341,7 @@ export default function Home() {
       }
 
       try {
-        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== ''); 
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
         if (lines.length < 2) {
             throw new Error("El archivo CSV está vacío o no tiene datos de empleados.");
         }
@@ -356,74 +351,81 @@ export default function Home() {
         if (employeeNameIndex === -1) {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
-        
-        const firstDayColumnIndex = 4; 
+        const firstDayColumnIndex = 4; // Shifts start after "Empleado", "Total D", "Total M", "Total T"
 
-        const newHistoryInputsState: { [employeeId: number]: { [date: string]: ShiftType | null } } = JSON.parse(JSON.stringify(historyInputs));
-        const previousDatesForHistory = getPreviousMonthDates(); 
+        const loadedEmployees: Employee[] = [];
+        const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
+        const previousDatesForHistory = getPreviousMonthDates(); // Relies on selectedMonth/Year
 
-        if (previousDatesForHistory.length === 0) {
-            toast({ title: "Error", description: "No se pudieron determinar las fechas del mes anterior para el historial.", variant: "destructive"});
-            return;
-        }
-        
-        let employeesFoundInCsv = 0;
-        let employeesMatchedAndUpdated = 0;
+        let employeesProcessedFromCsv = 0;
 
         for (let i = 1; i < lines.length; i++) {
           const line = lines[i];
           const cells = line.split(',');
           const employeeNameFromCSV = cells[employeeNameIndex]?.trim();
 
-          if (!employeeNameFromCSV || 
+          if (!employeeNameFromCSV ||
               employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
               employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
               employeeNameFromCSV.toLowerCase().startsWith("total personal")) {
-            break; 
+            break; // Stop processing at summary rows
           }
-          
-          employeesFoundInCsv++;
-          const employeeInApp = employees.find(emp => emp.name.trim().toLowerCase() === employeeNameFromCSV.toLowerCase());
 
-          if (employeeInApp) {
+          employeesProcessedFromCsv++;
+
+          let employeeInLoadedList = loadedEmployees.find(emp => emp.name.trim().toLowerCase() === employeeNameFromCSV.toLowerCase());
+
+          if (!employeeInLoadedList) {
+            employeeInLoadedList = {
+                id: Date.now() + loadedEmployees.length, // Generate new ID
+                name: employeeNameFromCSV,
+                eligibleWeekend: true, // Default value
+                preferences: {},       // Default value
+                history: {},           // This will be populated by the history import logic
+            };
+            loadedEmployees.push(employeeInLoadedList);
+          }
+
+          // Populate history for this employee (newly created or found)
+          if (previousDatesForHistory.length > 0) {
             const dailyShiftsFromCSV = cells.slice(firstDayColumnIndex);
-            
             const numHistoryDaysToTake = previousDatesForHistory.length;
+            // Take the *last* N shifts from the CSV for history
             const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
-            
-            if (relevantShiftsFromCSV.length > 0) {
-                employeesMatchedAndUpdated++;
-                if (!newHistoryInputsState[employeeInApp.id]) {
-                    newHistoryInputsState[employeeInApp.id] = {};
-                }
 
+            if (relevantShiftsFromCSV.length > 0) {
+                if (!loadedHistoryInputs[employeeInLoadedList.id]) {
+                    loadedHistoryInputs[employeeInLoadedList.id] = {};
+                }
                 previousDatesForHistory.forEach((dateStr, index) => {
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
                         if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
-                            newHistoryInputsState[employeeInApp.id][dateStr] = shiftValue as ShiftType;
+                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = shiftValue as ShiftType;
                         } else if (shiftValue === '' || shiftValue === '-') {
-                            newHistoryInputsState[employeeInApp.id][dateStr] = null;
+                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
                         } else if (shiftValue) {
                             console.warn(`Turno inválido '${shiftValue}' para ${employeeNameFromCSV} en CSV. Se ignora para fecha ${dateStr}.`);
                         }
                     }
                 });
             } else {
-                 console.warn(`No se encontraron suficientes columnas de turnos en el CSV para ${employeeNameFromCSV} para los ${numHistoryDaysToTake} días de historial.`);
+                 console.warn(`No se encontraron suficientes columnas de turnos en el CSV para ${employeeNameFromCSV} para los ${numHistoryDaysToTake} días de historial requeridos.`);
             }
-          } else {
-            console.warn(`Empleado '${employeeNameFromCSV}' del CSV no encontrado en la lista actual. Se ignora su historial.`);
           }
         }
-        
-        setHistoryInputs(newHistoryInputsState);
-        if (employeesMatchedAndUpdated > 0) {
-            toast({ title: "Importación Exitosa", description: `Historial actualizado para ${employeesMatchedAndUpdated} empleado(s) basado en ${employeesFoundInCsv} empleado(s) leídos del CSV.` });
-        } else if (employeesFoundInCsv > 0) {
-             toast({ title: "Importación Parcial", description: `Se leyeron ${employeesFoundInCsv} empleado(s) del CSV, pero ninguno coincidió o tuvo datos de historial válidos para actualizar.`, variant: "default" });
+
+        setEmployees(loadedEmployees);
+        setHistoryInputs(loadedHistoryInputs);
+        setAbsences([]); // Clear absences as employee list and IDs have changed
+
+        if (loadedEmployees.length > 0) {
+            const historyMessage = previousDatesForHistory.length > 0 ? `El historial de los últimos ${previousDatesForHistory.length} días también fue importado (si estaba disponible).` : "No se importó historial (mes/año no configurado para historial o CSV sin datos suficientes).";
+            toast({ title: "Importación Exitosa", description: `${loadedEmployees.length} empleado(s) cargado(s) desde el CSV. ${historyMessage}` });
+        } else if (employeesProcessedFromCsv > 0) {
+             toast({ title: "Importación Parcial", description: `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`, variant: "default" });
         } else {
-            toast({ title: "Sin Datos", description: "No se encontraron datos de empleados válidos en el CSV para importar historial.", variant: "default" });
+            toast({ title: "Sin Empleados Cargados", description: "No se encontraron datos de empleados válidos en el archivo CSV para cargar.", variant: "default" });
         }
 
       } catch (error) {
@@ -439,7 +441,7 @@ export default function Home() {
     reader.readAsText(file);
 
     if (event.target) {
-      event.target.value = ''; 
+      event.target.value = '';
     }
   };
 
@@ -469,21 +471,24 @@ export default function Home() {
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
         const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = 4; 
+        const firstShiftColIndex = 4;
         const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
 
         if (csvDayHeaders.length !== daysInSelectedMonth) {
           throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
         }
 
+        // Use existing employees list or load from CSV? For this function, we assume employees list is managed separately.
+        // The CSV provides shifts for employees *already in the system*.
+        // If an employee from CSV is not in the current 'employees' state, their schedule row is skipped.
         const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, employees, holidays);
         let employeesMatched = 0;
-        let employeesNotFound: string[] = [];
+        let employeesNotFoundInApp: string[] = [];
 
         for (let i = 1; i < lines.length; i++) {
           const cells = lines[i].split(',');
           const csvEmployeeName = cells[employeeNameColIndex]?.trim();
-          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break; 
+          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break;
 
           const appEmployee = employees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
           if (appEmployee) {
@@ -497,14 +502,16 @@ export default function Home() {
               }
             }
           } else {
-            if(!employeesNotFound.includes(csvEmployeeName)) employeesNotFound.push(csvEmployeeName);
+            if(!employeesNotFoundInApp.includes(csvEmployeeName)) employeesNotFoundInApp.push(csvEmployeeName);
           }
         }
 
-        if (employeesMatched === 0) {
-          throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados.");
+        if (employeesMatched === 0 && employees.length > 0) { // Only error if app has employees but none matched
+          throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados. Asegúrese de que los nombres coincidan o importe la lista de empleados primero si es necesario.");
+        } else if (employeesMatched === 0 && employees.length === 0) {
+          throw new Error("No hay empleados en la aplicación. Importe una lista de empleados antes de cargar un horario completo.");
         }
-        
+
         calculateFinalTotals(newSchedule, employees, absences);
         const newReport = validateSchedule(newSchedule, employees, absences, holidays, {
             workdayMorning: targetMWorkday,
@@ -516,7 +523,7 @@ export default function Home() {
         setSchedule(newSchedule);
         setReport(newReport);
         setDisplayMode('viewing');
-        toast({ title: "Horario Cargado", description: `Horario importado para ${employeesMatched} empleado(s). ${employeesNotFound.length > 0 ? `No se encontraron: ${employeesNotFound.slice(0,3).join(', ')}${employeesNotFound.length > 3 ? '...' : ''}` : ''}` });
+        toast({ title: "Horario Cargado", description: `Horario importado para ${employeesMatched} empleado(s). ${employeesNotFoundInApp.length > 0 ? `No se encontraron en la app: ${employeesNotFoundInApp.slice(0,3).join(', ')}${employeesNotFoundInApp.length > 3 ? '...' : ''}` : ''}` });
 
       } catch (error) {
         console.error("Error importando horario completo desde CSV:", error);
@@ -543,39 +550,44 @@ export default function Home() {
         toast({ title: "Error", description: "Por favor, seleccione mes y año antes de generar el horario.", variant: "destructive" });
         return;
     }
+    if (employees.length === 0) {
+        toast({ title: "Error de Configuración", description: "No hay empleados definidos. Por favor, agregue empleados o impórtelos desde un CSV.", variant: "destructive" });
+        setDisplayMode('config'); // Stay in config mode
+        return;
+    }
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
-    
+
 
     const employeesWithHistory = employees.map(emp => ({
       ...emp,
       history: historyInputs[emp.id] || {},
-      consecutiveWorkDays: 0 
+      consecutiveWorkDays: 0
     }));
 
 
      if (employeesWithHistory.length === 0) {
        setReport([{ rule: "Error de Entrada", passed: false, details: "No hay empleados definidos." }]);
        setIsLoading(false);
-       setDisplayMode('viewing'); 
+       setDisplayMode('viewing');
        return;
      }
      if (isNaN(selectedYear) || isNaN(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
          setReport([{ rule: "Error de Entrada", passed: false, details: "Mes o año inválido." }]);
          setIsLoading(false);
-         setDisplayMode('viewing'); 
+         setDisplayMode('viewing');
          return;
      }
-    
+
     const currentTargetStaffing: TargetStaffing = {
         workdayMorning: targetMWorkday,
         workdayAfternoon: targetTWorkday,
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
     };
-    
-    setDisplayMode('viewing'); 
+
+    setDisplayMode('viewing');
 
     setTimeout(() => {
       try {
@@ -607,7 +619,7 @@ export default function Home() {
         if (dayIndex !== -1) {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
             setSchedule(updatedSchedule);
-            setReport([]); 
+            setReport([]);
         }
     };
 
@@ -661,17 +673,17 @@ export default function Home() {
         csvContent += employeeRow + "\r\n";
     });
 
-    csvContent += "\r\n"; 
+    csvContent += "\r\n";
 
     csvContent += ["Total Mañana (TM)", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
     csvContent += ["Total Tarde (TT)", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
     csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
-    
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", fileName);
-    document.body.appendChild(link); 
+    document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
 };
@@ -694,8 +706,8 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (!shift) return "bg-background"; 
-    return SHIFT_COLORS[shift] || "bg-background"; 
+    if (!shift) return "bg-background";
+    return SHIFT_COLORS[shift] || "bg-background";
   };
 
    const getTotalsCellClass = (): string => {
@@ -733,8 +745,8 @@ export default function Home() {
                     <div className="flex gap-4 w-full md:w-auto">
                         <div className="flex-1">
                             <Label htmlFor="month-select">Mes</Label>
-                            <Select 
-                                value={selectedMonth?.toString() || ""} 
+                            <Select
+                                value={selectedMonth?.toString() || ""}
                                 onValueChange={(value) => setSelectedMonth(parseInt(value))}
                                 disabled={!isDateInitialized}
                             >
@@ -750,8 +762,8 @@ export default function Home() {
                         </div>
                         <div className="flex-1">
                             <Label htmlFor="year-select">Año</Label>
-                            <Select 
-                                value={selectedYear?.toString() || ""} 
+                            <Select
+                                value={selectedYear?.toString() || ""}
                                 onValueChange={(value) => setSelectedYear(parseInt(value))}
                                 disabled={!isDateInitialized}
                             >
@@ -770,9 +782,9 @@ export default function Home() {
                         <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
                             {isLoading ? 'Generando...' : 'Generar Horario'}
                         </Button>
-                        <Button 
-                            variant="outline" 
-                            onClick={() => document.getElementById('fullScheduleImportInput')?.click()} 
+                        <Button
+                            variant="outline"
+                            onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
                             disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
                             className="flex-1"
                         >
@@ -787,7 +799,7 @@ export default function Home() {
                         />
                     </div>
                 </div>
-                
+
                 <Card>
                     <CardHeader>
                         <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
@@ -913,7 +925,7 @@ export default function Home() {
                                                                             const newDays = checked
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? 'M'; 
+                                                                            const currentShift = field.value?.shift ?? 'M';
                                                                             field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                         }}
                                                                     />
@@ -964,12 +976,12 @@ export default function Home() {
                                             </div>
                                         </li>
                                     ))}
-                                    {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos.</p>}
+                                    {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
                                 </ul>
                                 <div className="mt-4 space-y-4 border-t pt-4">
-                                    <h4 className="text-md font-semibold">Historial (Últimos 5 días Mes Anterior)</h4>
-                                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2">
-                                        <Upload className="mr-2 h-4 w-4" /> Importar Historial CSV
+                                    <h4 className="text-md font-semibold">Importar Lista de Empleados e Historial (Últimos 5 días Mes Anterior)</h4>
+                                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
+                                        <Upload className="mr-2 h-4 w-4" /> Importar Empleados e Historial CSV
                                     </Button>
                                     <Input
                                       type="file"
@@ -978,32 +990,40 @@ export default function Home() {
                                       accept=".csv"
                                       onChange={handleImportHistoryFromCSV}
                                     />
-                                    {employees.map(emp => (
-                                        <div key={`hist-${emp.id}`} className="space-y-1">
-                                            <p className="text-sm font-medium">{emp.name}</p>
-                                            <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                                                {getPreviousMonthDates().map(dateStr => (
-                                                    <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
-                                                        <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
-                                                        <Select
-                                                            value={historyInputs[emp.id]?.[dateStr] || '-'}
-                                                            onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
-                                                        >
-                                                            <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
-                                                                <SelectValue placeholder="-" />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="-">- (Vacío)</SelectItem>
-                                                                {SHIFT_TYPES.map(st => (
-                                                                    <SelectItem key={st} value={st}>{st}</SelectItem>
-                                                                ))}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    ))}
+                                    {employees.length > 0 && getPreviousMonthDates().length > 0 && (
+                                      <>
+                                      <p className="text-xs text-muted-foreground">Edite el historial importado si es necesario:</p>
+                                      {employees.map(emp => (
+                                          <div key={`hist-${emp.id}`} className="space-y-1">
+                                              <p className="text-sm font-medium">{emp.name}</p>
+                                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                                  {getPreviousMonthDates().map(dateStr => (
+                                                      <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
+                                                          <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
+                                                          <Select
+                                                              value={historyInputs[emp.id]?.[dateStr] || '-'}
+                                                              onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
+                                                          >
+                                                              <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
+                                                                  <SelectValue placeholder="-" />
+                                                              </SelectTrigger>
+                                                              <SelectContent>
+                                                                  <SelectItem value="-">- (Vacío)</SelectItem>
+                                                                  {SHIFT_TYPES.map(st => (
+                                                                      <SelectItem key={st} value={st}>{st}</SelectItem>
+                                                                  ))}
+                                                              </SelectContent>
+                                                          </Select>
+                                                      </div>
+                                                  ))}
+                                              </div>
+                                          </div>
+                                      ))}
+                                      </>
+                                    )}
+                                    {employees.length > 0 && getPreviousMonthDates().length === 0 && (
+                                      <p className="text-xs text-muted-foreground">Seleccione mes/año principal para ver/editar historial del mes anterior.</p>
+                                    )}
                                 </div>
                             </CardContent>
                         </Card>
@@ -1019,7 +1039,7 @@ export default function Home() {
                                     }
                                 }}>
                                     <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }}>
+                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }} disabled={employees.length === 0}>
                                             <PlusCircle className="mr-2 h-4 w-4" /> Añadir
                                         </Button>
                                     </DialogTrigger>

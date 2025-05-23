@@ -16,7 +16,7 @@ import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSch
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
-import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid } from 'date-fns';
+import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid, getMonth, getYear as getFullYear } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react';
 import { useForm, Controller, useFieldArray } from "react-hook-form";
@@ -86,6 +86,36 @@ const holidaySchema = z.object({
     date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Formato debe ser YYYY-MM-DD"),
     description: z.string().min(1, "Descripción es requerida"),
 });
+
+// Helper function for holiday date validation
+function isHolidayDateValid(dateStr: string, currentYear: number | null, currentMonth: number | null): boolean {
+    if (!currentYear || !currentMonth) return false; 
+    try {
+        const holidayDate = parseISO(dateStr);
+        if (!isValid(holidayDate)) return false;
+        return getFullYear(holidayDate) === currentYear && getMonth(holidayDate) === currentMonth - 1;
+    } catch {
+        return false;
+    }
+}
+
+// Helper function for absence date range validation (overlap)
+function isAbsenceRangeValid(startDateStr: string, endDateStr: string, currentYear: number | null, currentMonth: number | null): boolean {
+    if (!currentYear || !currentMonth) return false;
+    try {
+        const absenceStart = parseISO(startDateStr);
+        const absenceEnd = parseISO(endDateStr);
+        if (!isValid(absenceStart) || !isValid(absenceEnd)) return false;
+
+        const periodStart = startOfMonth(new Date(currentYear, currentMonth - 1));
+        const periodEnd = endOfMonth(new Date(currentYear, currentMonth - 1));
+
+        return absenceStart <= periodEnd && absenceEnd >= periodStart;
+    } catch {
+        return false;
+    }
+}
+
 
 // --- Component ---
 export default function Home() {
@@ -185,6 +215,15 @@ export default function Home() {
 
 
   const handleAddAbsence = (data: z.infer<typeof absenceSchema>) => {
+    if (!selectedYear || !selectedMonth) {
+        toast({ title: "Error", description: "Por favor, seleccione mes y año en la pantalla principal antes de agregar una ausencia.", variant: "destructive" });
+        return;
+    }
+    if (!isAbsenceRangeValid(data.startDate, data.endDate, selectedYear, selectedMonth)) {
+        absenceForm.setError("startDate", { type: "manual", message: "El rango de la ausencia no se superpone con el período seleccionado." });
+        toast({ title: "Error de Validación", description: "El rango de la ausencia no se superpone con el mes y año seleccionados.", variant: "destructive" });
+        return;
+    }
     setAbsences(prev => [...prev, { ...data, id: Date.now() }]);
     setIsAbsenceDialogOpen(false);
     absenceForm.reset();
@@ -203,6 +242,15 @@ export default function Home() {
 
    const handleUpdateAbsence = (data: z.infer<typeof absenceSchema>) => {
      if (!editingAbsence?.id) return;
+     if (!selectedYear || !selectedMonth) {
+        toast({ title: "Error", description: "Por favor, seleccione mes y año en la pantalla principal antes de modificar una ausencia.", variant: "destructive" });
+        return;
+    }
+    if (!isAbsenceRangeValid(data.startDate, data.endDate, selectedYear, selectedMonth)) {
+        absenceForm.setError("startDate", { type: "manual", message: "El rango de la ausencia no se superpone con el período seleccionado." });
+        toast({ title: "Error de Validación", description: "El rango de la ausencia no se superpone con el mes y año seleccionados.", variant: "destructive" });
+        return;
+    }
      setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? { ...a, ...data } : a));
      setIsAbsenceDialogOpen(false);
      setEditingAbsence(null);
@@ -214,6 +262,15 @@ export default function Home() {
   };
 
   const handleAddHoliday = (data: z.infer<typeof holidaySchema>) => {
+    if (!selectedYear || !selectedMonth) {
+        toast({ title: "Error", description: "Por favor, seleccione mes y año en la pantalla principal antes de agregar un feriado.", variant: "destructive" });
+        return;
+    }
+    if (!isHolidayDateValid(data.date, selectedYear, selectedMonth)) {
+        holidayForm.setError("date", { type: "manual", message: "La fecha no corresponde al mes y año seleccionados." });
+        toast({ title: "Error de Validación", description: "La fecha del feriado no corresponde al mes y año seleccionados.", variant: "destructive" });
+        return;
+    }
     setHolidays(prev => [...prev, { ...data, id: Date.now() }]);
     setIsHolidayDialogOpen(false);
     holidayForm.reset();
@@ -230,6 +287,15 @@ export default function Home() {
 
     const handleUpdateHoliday = (data: z.infer<typeof holidaySchema>) => {
         if (!editingHoliday?.id) return;
+        if (!selectedYear || !selectedMonth) {
+            toast({ title: "Error", description: "Por favor, seleccione mes y año en la pantalla principal antes de modificar un feriado.", variant: "destructive" });
+            return;
+        }
+        if (!isHolidayDateValid(data.date, selectedYear, selectedMonth)) {
+            holidayForm.setError("date", { type: "manual", message: "La fecha no corresponde al mes y año seleccionados." });
+            toast({ title: "Error de Validación", description: "La fecha del feriado no corresponde al mes y año seleccionados.", variant: "destructive" });
+            return;
+        }
         setHolidays(prev => prev.map(h => h.id === editingHoliday.id ? { ...h, ...data } : h));
         setIsHolidayDialogOpen(false);
         setEditingHoliday(null);
@@ -251,7 +317,7 @@ export default function Home() {
     for (let i = 0; i < 5; i++) {
         dates.push(format(addDays(firstDayPreviousMonthRelevant, i), 'yyyy-MM-dd'));
     }
-    return dates.sort(); // Ensure chronological order for mapping from CSV
+    return dates.sort(); 
   }, [selectedYear, selectedMonth]);
 
   const handleHistoryChange = (employeeId: number, date: string, value: string) => {
@@ -280,7 +346,7 @@ export default function Home() {
       }
 
       try {
-        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== ''); // Filter out empty lines
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== ''); 
         if (lines.length < 2) {
             throw new Error("El archivo CSV está vacío o no tiene datos de empleados.");
         }
@@ -291,7 +357,7 @@ export default function Home() {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
         
-        const firstDayColumnIndex = 4; // Shifts start after "Empleado", "Total D", "Total M", "Total T"
+        const firstDayColumnIndex = 4; 
 
         const newHistoryInputsState: { [employeeId: number]: { [date: string]: ShiftType | null } } = JSON.parse(JSON.stringify(historyInputs));
         const previousDatesForHistory = getPreviousMonthDates(); 
@@ -322,7 +388,6 @@ export default function Home() {
           if (employeeInApp) {
             const dailyShiftsFromCSV = cells.slice(firstDayColumnIndex);
             
-            // Get the last 'N' shifts from CSV, where N is the number of history dates we need (max 5)
             const numHistoryDaysToTake = previousDatesForHistory.length;
             const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
             
@@ -333,9 +398,6 @@ export default function Home() {
                 }
 
                 previousDatesForHistory.forEach((dateStr, index) => {
-                    // Map the shifts from CSV (last N days) to the N previous month dates
-                    // The CSV's last N days map to the N history dates.
-                    // relevantShiftsFromCSV[0] is the (N)th last day in CSV, maps to previousDatesForHistory[0]
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
                         if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
@@ -377,7 +439,7 @@ export default function Home() {
     reader.readAsText(file);
 
     if (event.target) {
-      event.target.value = ''; // Reset file input to allow re-upload of same file
+      event.target.value = ''; 
     }
   };
 
@@ -407,7 +469,7 @@ export default function Home() {
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
         const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = 4; // After Empleado, Total D, Total M, Total T
+        const firstShiftColIndex = 4; 
         const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
 
         if (csvDayHeaders.length !== daysInSelectedMonth) {
@@ -421,7 +483,7 @@ export default function Home() {
         for (let i = 1; i < lines.length; i++) {
           const cells = lines[i].split(',');
           const csvEmployeeName = cells[employeeNameColIndex]?.trim();
-          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break; // Stop at summary rows
+          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break; 
 
           const appEmployee = employees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
           if (appEmployee) {
@@ -478,7 +540,7 @@ export default function Home() {
 
   const handleGenerateSchedule = () => {
     if (!isDateInitialized || selectedMonth === null || selectedYear === null) {
-        console.warn("Month or year not initialized yet.");
+        toast({ title: "Error", description: "Por favor, seleccione mes y año antes de generar el horario.", variant: "destructive" });
         return;
     }
     setIsLoading(true);
@@ -489,20 +551,20 @@ export default function Home() {
     const employeesWithHistory = employees.map(emp => ({
       ...emp,
       history: historyInputs[emp.id] || {},
-      consecutiveWorkDays: 0 // This will be recalculated by the generator
+      consecutiveWorkDays: 0 
     }));
 
 
      if (employeesWithHistory.length === 0) {
        setReport([{ rule: "Error de Entrada", passed: false, details: "No hay empleados definidos." }]);
        setIsLoading(false);
-       setDisplayMode('viewing'); // Show report even on error
+       setDisplayMode('viewing'); 
        return;
      }
      if (isNaN(selectedYear) || isNaN(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
          setReport([{ rule: "Error de Entrada", passed: false, details: "Mes o año inválido." }]);
          setIsLoading(false);
-         setDisplayMode('viewing'); // Show report even on error
+         setDisplayMode('viewing'); 
          return;
      }
     
@@ -513,7 +575,7 @@ export default function Home() {
         weekendHolidayAfternoon: targetTWeekendHoliday,
     };
     
-    setDisplayMode('viewing'); // Move display mode change here so config is hidden during generation
+    setDisplayMode('viewing'); 
 
     setTimeout(() => {
       try {
@@ -551,6 +613,10 @@ export default function Home() {
 
     const handleRecalculate = () => {
         if (!schedule) return;
+        if (!selectedYear || !selectedMonth) {
+            toast({ title: "Error", description: "Mes y año no seleccionados para recalcular.", variant: "destructive" });
+            return;
+        }
         setIsLoading(true);
         setReport([]);
          const scheduleToRecalculate = JSON.parse(JSON.stringify(schedule));
@@ -628,8 +694,8 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (!shift) return "bg-background"; // Or some other default
-    return SHIFT_COLORS[shift] || "bg-background"; // Fallback for unexpected shift types
+    if (!shift) return "bg-background"; 
+    return SHIFT_COLORS[shift] || "bg-background"; 
   };
 
    const getTotalsCellClass = (): string => {
@@ -638,7 +704,7 @@ export default function Home() {
 
    const getValidationIcon = (passed: boolean, rule: string) => {
        if (passed) return <CheckCircle className="text-green-600 h-5 w-5" />;
-       if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial") || rule.startsWith("Generator Info")) {
+       if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial") || rule.startsWith("Generator Info") || rule.startsWith("Prioridad 2 Info")) {
             return <Info className="text-yellow-600 h-5 w-5" />;
        }
        return <XCircle className="text-red-600 h-5 w-5" />;
@@ -847,7 +913,7 @@ export default function Home() {
                                                                             const newDays = checked
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? 'M'; // Default to 'M' if undefined
+                                                                            const currentShift = field.value?.shift ?? 'M'; 
                                                                             field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                         }}
                                                                     />
@@ -1219,7 +1285,7 @@ export default function Home() {
                 <CardContent>
                     <div className="space-y-3">
                     {report.map((item, index) => (
-                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") ? "border-yellow-300" : "border-red-200") )}>
+                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Prioridad 2 Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Prioridad 2 Info") ? "border-yellow-300" : "border-red-200") )}>
                             <div className="flex items-start space-x-3">
                             {getValidationIcon(item.passed, item.rule)}
                             <div>
@@ -1238,3 +1304,4 @@ export default function Home() {
     </div>
   );
 }
+

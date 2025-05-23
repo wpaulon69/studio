@@ -12,7 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { generateSchedule, calculateFinalTotals, validateSchedule } from '@/lib/schedule-generator';
+import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSchedule as initializeScheduleLib } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
@@ -377,9 +377,104 @@ export default function Home() {
     reader.readAsText(file);
 
     if (event.target) {
+      event.target.value = ''; // Reset file input to allow re-upload of same file
+    }
+  };
+
+  const handleLoadFullScheduleFromCSV = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !selectedMonth || !selectedYear || !isDateInitialized) {
+      toast({ title: "Error", description: "Seleccione mes y año antes de cargar un horario.", variant: "destructive" });
+      return;
+    }
+
+    setIsLoading(true);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      if (!text) {
+        toast({ title: "Error", description: "No se pudo leer el archivo.", variant: "destructive" });
+        setIsLoading(false);
+        return;
+      }
+
+      try {
+        const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
+        if (lines.length < 2) throw new Error("El CSV está vacío o no tiene suficientes filas.");
+
+        const headerCells = lines[0].split(',');
+        const employeeNameColIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'empleado');
+        if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
+
+        const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
+        const firstShiftColIndex = 4; // After Empleado, Total D, Total M, Total T
+        const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
+
+        if (csvDayHeaders.length !== daysInSelectedMonth) {
+          throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
+        }
+
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, employees, holidays);
+        let employeesMatched = 0;
+        let employeesNotFound: string[] = [];
+
+        for (let i = 1; i < lines.length; i++) {
+          const cells = lines[i].split(',');
+          const csvEmployeeName = cells[employeeNameColIndex]?.trim();
+          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break; // Stop at summary rows
+
+          const appEmployee = employees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
+          if (appEmployee) {
+            employeesMatched++;
+            for (let dayIdx = 0; dayIdx < daysInSelectedMonth; dayIdx++) {
+              const csvShift = cells[firstShiftColIndex + dayIdx]?.trim();
+              if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
+                newSchedule.days[dayIdx].shifts[appEmployee.id] = csvShift as ShiftType;
+              } else if (csvShift === '' || csvShift === '-') {
+                newSchedule.days[dayIdx].shifts[appEmployee.id] = null;
+              }
+            }
+          } else {
+            if(!employeesNotFound.includes(csvEmployeeName)) employeesNotFound.push(csvEmployeeName);
+          }
+        }
+
+        if (employeesMatched === 0) {
+          throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados.");
+        }
+        
+        calculateFinalTotals(newSchedule, employees, absences);
+        const newReport = validateSchedule(newSchedule, employees, absences, holidays, {
+            workdayMorning: targetMWorkday,
+            workdayAfternoon: targetTWorkday,
+            weekendHolidayMorning: targetMWeekendHoliday,
+            weekendHolidayAfternoon: targetTWeekendHoliday,
+        });
+
+        setSchedule(newSchedule);
+        setReport(newReport);
+        setDisplayMode('viewing');
+        toast({ title: "Horario Cargado", description: `Horario importado para ${employeesMatched} empleado(s). ${employeesNotFound.length > 0 ? `No se encontraron: ${employeesNotFound.slice(0,3).join(', ')}${employeesNotFound.length > 3 ? '...' : ''}` : ''}` });
+
+      } catch (error) {
+        console.error("Error importando horario completo desde CSV:", error);
+        toast({ title: "Error de Importación", description: error instanceof Error ? error.message : "Ocurrió un error procesando el archivo CSV del horario.", variant: "destructive" });
+        setSchedule(null);
+        setReport([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    reader.onerror = () => {
+      toast({ title: "Error", description: "No se pudo leer el archivo.", variant: "destructive" });
+      setIsLoading(false);
+    };
+    reader.readAsText(file);
+     if (event.target) {
       event.target.value = '';
     }
   };
+
 
   const handleGenerateSchedule = () => {
     if (!isDateInitialized || selectedMonth === null || selectedYear === null) {
@@ -389,7 +484,7 @@ export default function Home() {
     setIsLoading(true);
     setSchedule(null);
     setReport([]);
-    setDisplayMode('viewing');
+    
 
     const employeesWithHistory = employees.map(emp => ({
       ...emp,
@@ -401,11 +496,13 @@ export default function Home() {
      if (employeesWithHistory.length === 0) {
        setReport([{ rule: "Error de Entrada", passed: false, details: "No hay empleados definidos." }]);
        setIsLoading(false);
+       setDisplayMode('viewing'); // Show report even on error
        return;
      }
      if (isNaN(selectedYear) || isNaN(selectedMonth) || selectedMonth < 1 || selectedMonth > 12) {
          setReport([{ rule: "Error de Entrada", passed: false, details: "Mes o año inválido." }]);
          setIsLoading(false);
+         setDisplayMode('viewing'); // Show report even on error
          return;
      }
     
@@ -415,6 +512,8 @@ export default function Home() {
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
     };
+    
+    setDisplayMode('viewing'); // Move display mode change here so config is hidden during generation
 
     setTimeout(() => {
       try {
@@ -529,8 +628,8 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (!shift) return "bg-background";
-    return SHIFT_COLORS[shift] || "bg-background";
+    if (!shift) return "bg-background"; // Or some other default
+    return SHIFT_COLORS[shift] || "bg-background"; // Fallback for unexpected shift types
   };
 
    const getTotalsCellClass = (): string => {
@@ -561,7 +660,7 @@ export default function Home() {
             <Card className="mb-8 shadow-md">
                 <CardHeader>
                 <CardTitle className="text-2xl font-bold text-primary">ShiftSage - Configuración</CardTitle>
-                <CardDescription>Configure los parámetros para la generación del horario.</CardDescription>
+                <CardDescription>Configure los parámetros para la generación del horario o cargue uno existente.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
                 <div className="flex flex-col md:flex-row gap-4 items-end">
@@ -601,9 +700,26 @@ export default function Home() {
                             </Select>
                         </div>
                     </div>
-                    <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="w-full md:w-auto">
-                        {isLoading ? 'Generando...' : 'Generar Horario'}
-                    </Button>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                        <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
+                            {isLoading ? 'Generando...' : 'Generar Horario'}
+                        </Button>
+                        <Button 
+                            variant="outline" 
+                            onClick={() => document.getElementById('fullScheduleImportInput')?.click()} 
+                            disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
+                            className="flex-1"
+                        >
+                            <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV
+                        </Button>
+                        <Input
+                            type="file"
+                            id="fullScheduleImportInput"
+                            className="hidden"
+                            accept=".csv"
+                            onChange={handleLoadFullScheduleFromCSV}
+                        />
+                    </div>
                 </div>
                 
                 <Card>
@@ -1006,13 +1122,13 @@ export default function Home() {
             {!isLoading && schedule && selectedMonth !== null && selectedYear !== null && (
                 <Card className="mb-8 overflow-x-auto shadow-md">
                 <CardHeader>
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                         <div>
-                             <CardTitle className="text-xl">Horario Generado: {MONTHS.find(m=>m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
-                             <CardDescription>Puedes editar los turnos manualmente en la tabla. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
+                             <CardTitle className="text-xl">Horario: {MONTHS.find(m=>m.value === selectedMonth)?.label} {selectedYear}</CardTitle>
+                             <CardDescription>Puedes editar los turnos manualmente. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
                         </div>
-                         <div className="flex gap-2">
-                            <Button variant="outline" onClick={() => setDisplayMode('config')}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
+                         <div className="flex flex-wrap gap-2">
+                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config');}}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
                              <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
                                 <Download className="mr-2 h-4 w-4" /> Exportar a CSV
@@ -1122,5 +1238,3 @@ export default function Home() {
     </div>
   );
 }
-
-    

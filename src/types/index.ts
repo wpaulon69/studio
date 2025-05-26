@@ -18,8 +18,8 @@ export interface Employee {
 export type ShiftType = "M" | "T" | "D" | "F" | "LM" | "LAO" | "C";
 export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "F", "LM", "LAO", "C"];
 
-// Define the allowed shift types for fixed assignments, including 'D'
-export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D"];
+// Define the allowed shift types for fixed assignments, including 'D' and 'C'
+export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D", "C"];
 
 
 export interface Absence {
@@ -89,20 +89,27 @@ export interface ScheduleReport {
 }
 
 export const SHIFT_COLORS: Record<ShiftType, string> = {
-  M: "bg-green-100 text-green-800", // #d4edda
-  T: "bg-blue-100 text-blue-800", // #cce5ff
-  D: "bg-gray-200 text-gray-700", // #e9ecef
+  M: "bg-green-100 text-green-800",
+  T: "bg-blue-100 text-blue-800",
+  D: "bg-gray-200 text-gray-700",
   F: "bg-purple-100 text-purple-800",
-  LM: "bg-red-100 text-red-800", // #f8d7da
+  LM: "bg-red-100 text-red-800",
   LAO: "bg-pink-100 text-pink-800",
   C: "bg-teal-100 text-teal-800",
 };
 
-export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800"; // #fff3cd
+export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800";
 
 export interface TargetStaffing {
   workdayMorning: number;
   workdayAfternoon: number;
   weekendHolidayMorning: number;
   weekendHolidayAfternoon: number;
+}
+
+export interface OperationalRules {
+  requiredDdWeekends: number;
+  minCoverageTPT: number;
+  minCoverageM: number;
+  minCoverageT: number;
 }

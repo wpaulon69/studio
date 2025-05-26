@@ -13,7 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSchedule as initializeScheduleLib } from '@/lib/schedule-generator';
-import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing } from '@/types';
+import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid, getMonth, getYear as getFullYear } from 'date-fns';
@@ -133,6 +133,12 @@ export default function Home() {
   // Consecutive days rules state
   const [maxConsecutiveWork, setMaxConsecutiveWork] = useState<number>(6);
   const [maxConsecutiveRest, setMaxConsecutiveRest] = useState<number>(2);
+
+  // Operational Rules State
+  const [requiredDdWeekends, setRequiredDdWeekends] = useState<number>(1);
+  const [minCoverageTPT, setMinCoverageTPT] = useState<number>(2);
+  const [minCoverageM, setMinCoverageM] = useState<number>(1);
+  const [minCoverageT, setMinCoverageT] = useState<number>(1);
 
 
   useEffect(() => {
@@ -516,13 +522,21 @@ export default function Home() {
           throw new Error("No hay empleados en la aplicación. Importe una lista de empleados antes de cargar un horario completo.");
         }
 
+        const currentTargetStaffing: TargetStaffing = {
+          workdayMorning: targetMWorkday,
+          workdayAfternoon: targetTWorkday,
+          weekendHolidayMorning: targetMWeekendHoliday,
+          weekendHolidayAfternoon: targetTWeekendHoliday,
+        };
+        const currentOperationalRules: OperationalRules = {
+            requiredDdWeekends: requiredDdWeekends,
+            minCoverageTPT: minCoverageTPT,
+            minCoverageM: minCoverageM,
+            minCoverageT: minCoverageT,
+        };
+
         calculateFinalTotals(newSchedule, employees, absences);
-        const newReport = validateSchedule(newSchedule, employees, absences, holidays, {
-            workdayMorning: targetMWorkday,
-            workdayAfternoon: targetTWorkday,
-            weekendHolidayMorning: targetMWeekendHoliday,
-            weekendHolidayAfternoon: targetTWeekendHoliday,
-        }, maxConsecutiveWork, maxConsecutiveRest);
+        const newReport = validateSchedule(newSchedule, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
 
         setSchedule(newSchedule);
         setReport(newReport);
@@ -590,6 +604,12 @@ export default function Home() {
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
     };
+    const currentOperationalRules: OperationalRules = {
+        requiredDdWeekends: requiredDdWeekends,
+        minCoverageTPT: minCoverageTPT,
+        minCoverageM: minCoverageM,
+        minCoverageT: minCoverageT,
+    };
 
     setDisplayMode('viewing');
 
@@ -603,7 +623,8 @@ export default function Home() {
           JSON.parse(JSON.stringify(holidays)),
           currentTargetStaffing,
           maxConsecutiveWork,
-          maxConsecutiveRest
+          maxConsecutiveRest,
+          currentOperationalRules
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -644,11 +665,17 @@ export default function Home() {
             weekendHolidayMorning: targetMWeekendHoliday,
             weekendHolidayAfternoon: targetTWeekendHoliday,
         };
+         const currentOperationalRules: OperationalRules = {
+            requiredDdWeekends: requiredDdWeekends,
+            minCoverageTPT: minCoverageTPT,
+            minCoverageM: minCoverageM,
+            minCoverageT: minCoverageT,
+        };
 
          setTimeout(() => {
              try {
                 calculateFinalTotals(scheduleToRecalculate, employees, absences);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest);
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -845,6 +872,32 @@ export default function Home() {
                             <div>
                                 <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
                                 <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div>
+                                <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
+                                <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                             <div>
+                                <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
+                                <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                            <div>
+                                <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
+                                <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                            <div>
+                                <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT)</Label>
+                                <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
                             </div>
                         </div>
                     </CardContent>
@@ -1312,7 +1365,7 @@ export default function Home() {
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className="sticky left-0 z-10 border p-1 text-sm min-w-[170px] w-[170px]">TOTAL PERSONAL (TPT)</TableCell>
                              <TableCell className={cn("sticky left-[170px] z-10 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
-                            {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < 2 || (!day.isHoliday && !day.isWeekend && day.totals.TPT > 2 && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
+                            {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
                     </Table>

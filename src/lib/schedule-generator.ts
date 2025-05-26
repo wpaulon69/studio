@@ -10,16 +10,11 @@ import type {
   ValidationResult,
   EmployeeTotals,
   TargetStaffing,
+  OperationalRules,
 } from '@/types';
 import { differenceInDays, format, parseISO, addDays, getDay, isWeekend, startOfMonth, endOfMonth, getDate, subDays, isValid, getDaysInMonth as getNativeDaysInMonth } from 'date-fns';
 import { es } from 'date-fns/locale'; // Import Spanish locale
 
-// --- Constants and Configuration ---
-// Removed hardcoded MAX_CONSECUTIVE_WORK_DAYS and MAX_CONSECUTIVE_NON_WORK_DAYS
-const REQUIRED_DD_WEEKENDS = 1; // Or D/C, C/D, C/C or F/F if holiday
-const MIN_COVERAGE_TPT = 2;
-const MIN_COVERAGE_M = 1;
-const MIN_COVERAGE_T = 1;
 
 // --- Helper Functions ---
 
@@ -459,6 +454,7 @@ export function validateSchedule(
     targetStaffing: TargetStaffing,
     maxConsecutiveWorkDays: number,
     maxConsecutiveNonWorkDays: number,
+    operationalRules: OperationalRules,
     reportAccumulator?: ValidationResult[]
 ): ValidationResult[] {
   const results: ValidationResult[] = reportAccumulator || [];
@@ -545,21 +541,21 @@ export function validateSchedule(
      let dayPassed = true;
      let details = [];
 
-     if (TPT < MIN_COVERAGE_TPT) {
+     if (TPT < operationalRules.minCoverageTPT) {
        dayPassed = false;
-       details.push(`TPT=${TPT} (<${MIN_COVERAGE_TPT})`);
+       details.push(`TPT=${TPT} (<${operationalRules.minCoverageTPT})`);
      }
-     if (M < MIN_COVERAGE_M) {
+     if (M < operationalRules.minCoverageM) {
          dayPassed = false;
-         details.push(`M=${M} (<${MIN_COVERAGE_M})`);
+         details.push(`M=${M} (<${operationalRules.minCoverageM})`);
      }
-     if (T < MIN_COVERAGE_T) {
+     if (T < operationalRules.minCoverageT) {
           dayPassed = false;
-         details.push(`T=${T} (<${MIN_COVERAGE_T})`);
+         details.push(`T=${T} (<${operationalRules.minCoverageT})`);
      }
-     if (TPT > MIN_COVERAGE_TPT && !day.isHoliday && !day.isWeekend && M <= T) {
+     if (TPT > operationalRules.minCoverageTPT && !day.isHoliday && !day.isWeekend && M <= T) {
          dayPassed = false;
-         details.push(`M<=T (M=${M},T=${T}) en día laboral con TPT>${MIN_COVERAGE_TPT}`);
+         details.push(`M<=T (M=${M},T=${T}) en día laboral con TPT>${operationalRules.minCoverageTPT}`);
      }
 
      if(!dayPassed) {
@@ -645,11 +641,11 @@ export function validateSchedule(
          }
       } catch(e){ console.warn("Error parseando fecha en validación Prio 4", e); continue; }
     }
-     if (ddWeekends < REQUIRED_DD_WEEKENDS) {
+     if (ddWeekends < operationalRules.requiredDdWeekends) {
          results.push({
            rule: `Prioridad 4 - Fin de Semana D/D (o C/C, F/F) (${emp.name})`,
            passed: false,
-           details: `Falló: Tiene ${ddWeekends} fin(es) de semana de descanso completo, requiere ${REQUIRED_DD_WEEKENDS}.`,
+           details: `Falló: Tiene ${ddWeekends} fin(es) de semana de descanso completo, requiere ${operationalRules.requiredDdWeekends}.`,
          });
          prio4Passed = false;
      }
@@ -992,7 +988,8 @@ function iterativeAssignShifts(
     targetStaffing: TargetStaffing,
     report: ValidationResult[],
     maxConsecutiveWorkDays: number,
-    maxConsecutiveNonWorkDays: number
+    maxConsecutiveNonWorkDays: number,
+    operationalRules: OperationalRules
 ) {
     const baseWeekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
     currentEmployeesState = employees; // Make employees accessible to assignShift via this module-level variable
@@ -1058,17 +1055,17 @@ function iterativeAssignShifts(
             return false;
         };
 
-        // Ensure M >= 1
-        while (day.totals.M < MIN_COVERAGE_M) {
+        // Ensure M >= minCoverageM
+        while (day.totals.M < operationalRules.minCoverageM) {
             if (!assignShiftIfPossible('M', false)) break;
         }
-        // Ensure T >= 1
-        while (day.totals.T < MIN_COVERAGE_T) {
+        // Ensure T >= minCoverageT
+        while (day.totals.T < operationalRules.minCoverageT) {
             if (!assignShiftIfPossible('T', false)) break;
         }
-        // Ensure TPT >= 2
-        while (day.totals.TPT < MIN_COVERAGE_TPT) {
-            // Prioritize M if it's lower or equal to T to help meet M>T rule later if TPT > 2
+        // Ensure TPT >= minCoverageTPT
+        while (day.totals.TPT < operationalRules.minCoverageTPT) {
+            // Prioritize M if it's lower or equal to T to help meet M>T rule later if TPT > minCoverageTPT
             if (day.totals.M <= day.totals.T) {
                 if (assignShiftIfPossible('M', false)) continue;
                 if (assignShiftIfPossible('T', false)) continue; // Fallback to T if M can't be assigned
@@ -1080,24 +1077,24 @@ function iterativeAssignShifts(
         }
 
         // If still not meeting coverage, try with relaxed rules
-        if (day.totals.M < MIN_COVERAGE_M || day.totals.T < MIN_COVERAGE_T || day.totals.TPT < MIN_COVERAGE_TPT) {
-            if(day.totals.M < MIN_COVERAGE_M) console.warn(`Pass 1 (${dateStr}): M < ${MIN_COVERAGE_M} (${day.totals.M}). Intentando con restricciones relajadas para M.`);
-            if(day.totals.T < MIN_COVERAGE_T) console.warn(`Pass 1 (${dateStr}): T < ${MIN_COVERAGE_T} (${day.totals.T}). Intentando con restricciones relajadas para T.`);
-            if(day.totals.TPT < MIN_COVERAGE_TPT && !(day.totals.M < MIN_COVERAGE_M || day.totals.T < MIN_COVERAGE_T) ) console.warn(`Pass 1 (${dateStr}): TPT < ${MIN_COVERAGE_TPT} (${day.totals.TPT}). Intentando con restricciones relajadas para TPT.`);
+        if (day.totals.M < operationalRules.minCoverageM || day.totals.T < operationalRules.minCoverageT || day.totals.TPT < operationalRules.minCoverageTPT) {
+            if(day.totals.M < operationalRules.minCoverageM) console.warn(`Pass 1 (${dateStr}): M < ${operationalRules.minCoverageM} (${day.totals.M}). Intentando con restricciones relajadas para M.`);
+            if(day.totals.T < operationalRules.minCoverageT) console.warn(`Pass 1 (${dateStr}): T < ${operationalRules.minCoverageT} (${day.totals.T}). Intentando con restricciones relajadas para T.`);
+            if(day.totals.TPT < operationalRules.minCoverageTPT && !(day.totals.M < operationalRules.minCoverageM || day.totals.T < operationalRules.minCoverageT) ) console.warn(`Pass 1 (${dateStr}): TPT < ${operationalRules.minCoverageTPT} (${day.totals.TPT}). Intentando con restricciones relajadas para TPT.`);
             
             availableEmployees = employees.filter(e => day.shifts[e.id] === null); // Refresh available employees for relaxed pass
 
-            // Relaxed pass for M >= 1
-            while (day.totals.M < MIN_COVERAGE_M) {
+            // Relaxed pass for M >= minCoverageM
+            while (day.totals.M < operationalRules.minCoverageM) {
                 if (!assignShiftIfPossible('M', true)) break; // relaxed = true
             }
-            // Relaxed pass for T >= 1
-            while (day.totals.T < MIN_COVERAGE_T) {
+            // Relaxed pass for T >= minCoverageT
+            while (day.totals.T < operationalRules.minCoverageT) {
                 if (!assignShiftIfPossible('T', true)) break; // relaxed = true
             }
             
-            // Relaxed pass for TPT >= 2
-            while (day.totals.TPT < MIN_COVERAGE_TPT) {
+            // Relaxed pass for TPT >= minCoverageTPT
+            while (day.totals.TPT < operationalRules.minCoverageTPT) {
                 let assignedInRelaxedTPTIteration = false;
                  if (day.totals.M <= day.totals.T) { // Prioritize M if it's lower or equal
                     if (assignShiftIfPossible('M', true)) { // relaxed = true
@@ -1115,19 +1112,19 @@ function iterativeAssignShifts(
 
 
                 if (!assignedInRelaxedTPTIteration) {
-                    console.error(`Pass 1 (${dateStr}): IMPOSIBLE cumplir TPT >= ${MIN_COVERAGE_TPT} incluso con restricciones relajadas. Actual TPT: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}.`);
+                    console.error(`Pass 1 (${dateStr}): IMPOSIBLE cumplir TPT >= ${operationalRules.minCoverageTPT} incluso con restricciones relajadas. Actual TPT: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}.`);
                     const ruleKey = `Prioridad 2 Alerta Grave - Cobertura TPT (${format(parseISO(day.date), 'dd/MM', { locale: es })})`;
                     if (!report.some(r => r.rule === ruleKey)) { // Avoid duplicate critical errors for the same day
-                        report.push({ rule: ruleKey, passed: false, details: `Falló: No se pudo alcanzar TPT >= ${MIN_COVERAGE_TPT}. TPT Actual: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}. Posibles causas: empleados no disponibles (LAO/LM) o conflictos con asignaciones/preferencias fijas no flexibles.` });
+                        report.push({ rule: ruleKey, passed: false, details: `Falló: No se pudo alcanzar TPT >= ${operationalRules.minCoverageTPT}. TPT Actual: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}. Posibles causas: empleados no disponibles (LAO/LM) o conflictos con asignaciones/preferencias fijas no flexibles.` });
                     }
                     break; // Exit loop if no assignment possible
                 }
             }
         }
-         // Final check for M > T if TPT > 2 on workdays
+         // Final check for M > T if TPT > minCoverageTPT on workdays
          calculateDayTotals(day); // Recalculate totals one last time for the day after all M/T assignments
-         if (day.totals.TPT > MIN_COVERAGE_TPT && !day.isHoliday && !day.isWeekend && day.totals.M <= day.totals.T) {
-             console.warn(`Pass 1 (${dateStr}): TPT > ${MIN_COVERAGE_TPT} pero M (${day.totals.M}) <= T (${day.totals.T}). Intentando asignar M adicional.`);
+         if (day.totals.TPT > operationalRules.minCoverageTPT && !day.isHoliday && !day.isWeekend && day.totals.M <= day.totals.T) {
+             console.warn(`Pass 1 (${dateStr}): TPT > ${operationalRules.minCoverageTPT} pero M (${day.totals.M}) <= T (${day.totals.T}). Intentando asignar M adicional.`);
              availableEmployees = employees.filter(e => day.shifts[e.id] === null); // Refresh available employees
              if (!assignShiftIfPossible('M', false)) { // Try standard first
                  assignShiftIfPossible('M', true);    // Then relaxed if needed
@@ -1335,10 +1332,11 @@ export function generateSchedule(
   initialHolidays: Holiday[],
   targetStaffing: TargetStaffing,
   maxConsecutiveWorkDays: number,
-  maxConsecutiveNonWorkDays: number
+  maxConsecutiveNonWorkDays: number,
+  operationalRules: OperationalRules
 ): { schedule: Schedule; report: ValidationResult[] } {
 
-  console.log("Iniciando Generación de Horario para", { year, month, targetStaffing, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays });
+  console.log("Iniciando Generación de Horario para", { year, month, targetStaffing, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, operationalRules });
   const employeesForGeneration: Employee[] = JSON.parse(JSON.stringify(initialEmployees));
   const absencesForGeneration: Absence[] = JSON.parse(JSON.stringify(initialAbsences));
   const holidaysForGeneration: Holiday[] = JSON.parse(JSON.stringify(initialHolidays));
@@ -1361,14 +1359,14 @@ export function generateSchedule(
 
 
   console.log("Iniciando pases de asignación iterativa...");
-  iterativeAssignShifts(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, report, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays);
+  iterativeAssignShifts(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, report, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, operationalRules);
   console.log("Pases de asignación iterativa finalizados.");
 
   console.log("Calculando totales finales post-iteración...");
   calculateFinalTotals(schedule, employeesForGeneration, absencesForGeneration);
 
   console.log("Validando horario final...");
-  const finalReport = validateSchedule(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, report);
+  const finalReport = validateSchedule(schedule, employeesForGeneration, absencesForGeneration, holidaysForGeneration, targetStaffing, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, operationalRules, report);
   const endTime = performance.now();
   console.log(`Generación de horario completada en ${(endTime - startTime).toFixed(2)} ms`);
 
@@ -1406,4 +1404,3 @@ export function generateSchedule(
 
   return { schedule, report: finalReport };
 }
-

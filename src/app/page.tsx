@@ -770,7 +770,7 @@ export default function Home() {
        {displayMode === 'config' && (
             <Card className="mb-8 shadow-md">
                 <CardHeader>
-                <CardTitle className="text-2xl font-bold text-primary">ShiftSage - Configuración</CardTitle>
+                <CardTitle className="text-2xl font-bold text-primary">Ayuda horarios - Configuración</CardTitle>
                 <CardDescription>Configure los parámetros para la generación del horario o cargue uno existente.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
@@ -1401,4 +1401,3 @@ export default function Home() {
     </div>
   );
 }
-

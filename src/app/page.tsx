@@ -54,7 +54,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)),
-        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D'])) as [string, ...string[]])
+        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C'])) as [string, ...string[]])
     }).optional()
 });
 
@@ -129,6 +129,10 @@ export default function Home() {
   const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
   const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
   const { toast } = useToast();
+
+  // Consecutive days rules state
+  const [maxConsecutiveWork, setMaxConsecutiveWork] = useState<number>(6);
+  const [maxConsecutiveRest, setMaxConsecutiveRest] = useState<number>(2);
 
 
   useEffect(() => {
@@ -518,7 +522,7 @@ export default function Home() {
             workdayAfternoon: targetTWorkday,
             weekendHolidayMorning: targetMWeekendHoliday,
             weekendHolidayAfternoon: targetTWeekendHoliday,
-        });
+        }, maxConsecutiveWork, maxConsecutiveRest);
 
         setSchedule(newSchedule);
         setReport(newReport);
@@ -597,7 +601,9 @@ export default function Home() {
           JSON.parse(JSON.stringify(employeesWithHistory)),
           JSON.parse(JSON.stringify(absences)),
           JSON.parse(JSON.stringify(holidays)),
-          currentTargetStaffing
+          currentTargetStaffing,
+          maxConsecutiveWork,
+          maxConsecutiveRest
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -642,7 +648,7 @@ export default function Home() {
          setTimeout(() => {
              try {
                 calculateFinalTotals(scheduleToRecalculate, employees, absences);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing);
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest);
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -729,7 +735,7 @@ export default function Home() {
     ];
 
      const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
-     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D']));
+     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C']));
 
 
   return (
@@ -821,6 +827,24 @@ export default function Home() {
                             <div>
                                 <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
                                 <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                 <Card>
+                    <CardHeader>
+                        <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
+                                <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
+                            </div>
+                            <div>
+                                <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
+                                <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
                             </div>
                         </div>
                     </CardContent>

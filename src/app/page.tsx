@@ -739,7 +739,7 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (!shift) return "bg-background";
+    if (shift === null) return "bg-destructive text-destructive-foreground"; // Highlight empty slots
     return SHIFT_COLORS[shift] || "bg-background";
   };
 

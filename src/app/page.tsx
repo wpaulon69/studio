@@ -1304,7 +1304,7 @@ export default function Home() {
                     <TableHeader>
                         <TableRow className="bg-secondary">
                         <TableHead className="sticky left-0 bg-secondary z-30 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
-                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
+                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]")}>D</TableHead>
 
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead
@@ -1325,7 +1325,7 @@ export default function Home() {
                         {employees.map(emp => (
                         <TableRow key={emp.id}>
                             <TableCell className="sticky left-0 bg-background z-30 border p-1 font-medium text-sm whitespace-nowrap min-w-[170px] w-[170px]">{emp.name}</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]")}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
 
                             {schedule.days.map(day => {
                             const currentShift = day.shifts[emp.id];
@@ -1353,17 +1353,17 @@ export default function Home() {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className="sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]">Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
                         <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className="sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]">Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className="sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]">TOTAL PERSONAL (TPT)</TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
                              <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
@@ -1382,7 +1382,7 @@ export default function Home() {
                 <CardContent>
                     <div className="space-y-3">
                     {report.map((item, index) => (
-                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Prioridad 2 Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Prioridad 2 Info") ? "border-yellow-300" : "border-red-200") )}>
+                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? "border-yellow-300" : "border-red-200") )}>
                             <div className="flex items-start space-x-3">
                             {getValidationIcon(item.passed, item.rule)}
                             <div>

@@ -774,135 +774,64 @@ export default function Home() {
                 <CardDescription>Configure los parámetros para la generación del horario o cargue uno existente.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                <div className="flex flex-col md:flex-row gap-4 items-end">
-                    <div className="flex gap-4 w-full md:w-auto">
-                        <div className="flex-1">
-                            <Label htmlFor="month-select">Mes</Label>
-                            <Select
-                                value={selectedMonth?.toString() || ""}
-                                onValueChange={(value) => setSelectedMonth(parseInt(value))}
-                                disabled={!isDateInitialized}
-                            >
-                                <SelectTrigger id="month-select">
-                                    <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {MONTHS.map(m => (
-                                        <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                    <div className="flex flex-col md:flex-row gap-4 items-end">
+                        <div className="flex gap-4 w-full md:w-auto">
+                            <div className="flex-1">
+                                <Label htmlFor="month-select">Mes</Label>
+                                <Select
+                                    value={selectedMonth?.toString() || ""}
+                                    onValueChange={(value) => setSelectedMonth(parseInt(value))}
+                                    disabled={!isDateInitialized}
+                                >
+                                    <SelectTrigger id="month-select">
+                                        <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {MONTHS.map(m => (
+                                            <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex-1">
+                                <Label htmlFor="year-select">Año</Label>
+                                <Select
+                                    value={selectedYear?.toString() || ""}
+                                    onValueChange={(value) => setSelectedYear(parseInt(value))}
+                                    disabled={!isDateInitialized}
+                                >
+                                    <SelectTrigger id="year-select">
+                                    <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                    {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
+                                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
                                     ))}
-                                </SelectContent>
-                            </Select>
+                                    </SelectContent>
+                                </Select>
+                            </div>
                         </div>
-                        <div className="flex-1">
-                            <Label htmlFor="year-select">Año</Label>
-                            <Select
-                                value={selectedYear?.toString() || ""}
-                                onValueChange={(value) => setSelectedYear(parseInt(value))}
-                                disabled={!isDateInitialized}
+                        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                            <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
+                                {isLoading ? 'Generando...' : 'Generar Horario'}
+                            </Button>
+                            <Button
+                                variant="outline"
+                                onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
+                                disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
+                                className="flex-1"
                             >
-                                <SelectTrigger id="year-select">
-                                <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
-                                </SelectTrigger>
-                                <SelectContent>
-                                {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
-                                    <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                                ))}
-                                </SelectContent>
-                            </Select>
+                                <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV
+                            </Button>
+                            <Input
+                                type="file"
+                                id="fullScheduleImportInput"
+                                className="hidden"
+                                accept=".csv"
+                                onChange={handleLoadFullScheduleFromCSV}
+                            />
                         </div>
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                        <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
-                            {isLoading ? 'Generando...' : 'Generar Horario'}
-                        </Button>
-                        <Button
-                            variant="outline"
-                            onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
-                            disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
-                            className="flex-1"
-                        >
-                            <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV
-                        </Button>
-                        <Input
-                            type="file"
-                            id="fullScheduleImportInput"
-                            className="hidden"
-                            accept=".csv"
-                            onChange={handleLoadFullScheduleFromCSV}
-                        />
-                    </div>
-                </div>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
-                                <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                            <div>
-                                <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
-                                <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                            <div>
-                                <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
-                                <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                            <div>
-                                <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
-                                <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                 <Card>
-                    <CardHeader>
-                        <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
-                                <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
-                            </div>
-                            <div>
-                                <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
-                                <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div>
-                                <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
-                                <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                             <div>
-                                <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
-                                <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                            <div>
-                                <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
-                                <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                            <div>
-                                <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT)</Label>
-                                <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
-                            </div>
-                        </div>
-                    </CardContent>
-                </Card>
-
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                         <Card>
@@ -1272,6 +1201,76 @@ export default function Home() {
                         </Card>
                     </div>
 
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
+                                    <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
+                                    <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
+                                    <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
+                                    <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
+                                    <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
+                                    <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
+                        </CardHeader>
+                        <CardContent className="space-y-4">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                <div>
+                                    <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
+                                    <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                 <div>
+                                    <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
+                                    <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
+                                    <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT)</Label>
+                                    <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                            </div>
+                        </CardContent>
+                    </Card>
+
                 </CardContent>
             </Card>
         )}
@@ -1401,4 +1400,3 @@ export default function Home() {
     </div>
   );
 }
-

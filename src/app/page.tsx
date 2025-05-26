@@ -54,7 +54,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)),
-        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C'])) as [string, ...string[]])
+        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N'])) as [string, ...string[]])
     }).optional()
 });
 
@@ -126,8 +126,10 @@ export default function Home() {
   // Target Staffing State
   const [targetMWorkday, setTargetMWorkday] = useState<number>(3);
   const [targetTWorkday, setTargetTWorkday] = useState<number>(1);
+  const [targetNWorkday, setTargetNWorkday] = useState<number>(1); // Added for Night shift
   const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
   const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
+  const [targetNWeekendHoliday, setTargetNWeekendHoliday] = useState<number>(1); // Added for Night shift
   const { toast } = useToast();
 
   // Consecutive days rules state
@@ -139,6 +141,7 @@ export default function Home() {
   const [minCoverageTPT, setMinCoverageTPT] = useState<number>(2);
   const [minCoverageM, setMinCoverageM] = useState<number>(1);
   const [minCoverageT, setMinCoverageT] = useState<number>(1);
+  const [minCoverageN, setMinCoverageN] = useState<number>(1); // Added for Night shift
 
 
   useEffect(() => {
@@ -361,7 +364,7 @@ export default function Home() {
         if (employeeNameIndex === -1) {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
-        const firstDayColumnIndex = 4; // Shifts start after "Empleado", "Total D", "Total M", "Total T"
+        const firstDayColumnIndex = 5; // Shifts start after "Empleado", "Total D", "Total M", "Total T", "Total N"
 
         const loadedEmployees: Employee[] = [];
         const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
@@ -377,6 +380,7 @@ export default function Home() {
           if (!employeeNameFromCSV ||
               employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
               employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
+              employeeNameFromCSV.toLowerCase().startsWith("total noche") ||
               employeeNameFromCSV.toLowerCase().startsWith("total personal")) {
             break; // Stop processing at summary rows
           }
@@ -481,16 +485,13 @@ export default function Home() {
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
         const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = 4;
+        const firstShiftColIndex = 5; // After Empleado, Total D, Total M, Total T, Total N
         const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
 
         if (csvDayHeaders.length !== daysInSelectedMonth) {
           throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
         }
 
-        // Use existing employees list or load from CSV? For this function, we assume employees list is managed separately.
-        // The CSV provides shifts for employees *already in the system*.
-        // If an employee from CSV is not in the current 'employees' state, their schedule row is skipped.
         const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, employees, holidays);
         let employeesMatched = 0;
         let employeesNotFoundInApp: string[] = [];
@@ -516,7 +517,7 @@ export default function Home() {
           }
         }
 
-        if (employeesMatched === 0 && employees.length > 0) { // Only error if app has employees but none matched
+        if (employeesMatched === 0 && employees.length > 0) { 
           throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados. Asegúrese de que los nombres coincidan o importe la lista de empleados primero si es necesario.");
         } else if (employeesMatched === 0 && employees.length === 0) {
           throw new Error("No hay empleados en la aplicación. Importe una lista de empleados antes de cargar un horario completo.");
@@ -525,14 +526,17 @@ export default function Home() {
         const currentTargetStaffing: TargetStaffing = {
           workdayMorning: targetMWorkday,
           workdayAfternoon: targetTWorkday,
+          workdayNight: targetNWorkday,
           weekendHolidayMorning: targetMWeekendHoliday,
           weekendHolidayAfternoon: targetTWeekendHoliday,
+          weekendHolidayNight: targetNWeekendHoliday,
         };
         const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
+            minCoverageN: minCoverageN,
         };
 
         calculateFinalTotals(newSchedule, employees, absences);
@@ -601,14 +605,17 @@ export default function Home() {
     const currentTargetStaffing: TargetStaffing = {
         workdayMorning: targetMWorkday,
         workdayAfternoon: targetTWorkday,
+        workdayNight: targetNWorkday,
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
+        weekendHolidayNight: targetNWeekendHoliday,
     };
     const currentOperationalRules: OperationalRules = {
         requiredDdWeekends: requiredDdWeekends,
         minCoverageTPT: minCoverageTPT,
         minCoverageM: minCoverageM,
         minCoverageT: minCoverageT,
+        minCoverageN: minCoverageN,
     };
 
     setDisplayMode('viewing');
@@ -662,14 +669,17 @@ export default function Home() {
          const currentTargetStaffing: TargetStaffing = {
             workdayMorning: targetMWorkday,
             workdayAfternoon: targetTWorkday,
+            workdayNight: targetNWorkday,
             weekendHolidayMorning: targetMWeekendHoliday,
             weekendHolidayAfternoon: targetTWeekendHoliday,
+            weekendHolidayNight: targetNWeekendHoliday,
         };
          const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
+            minCoverageN: minCoverageN,
         };
 
          setTimeout(() => {
@@ -696,21 +706,22 @@ export default function Home() {
     let csvContent = "data:text/csv;charset=utf-8,";
 
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
-    const headerRow = ["Empleado", "Total D", "Total M", "Total T", ...dayNumbers].join(",");
+    const headerRow = ["Empleado", "Total D", "Total M", "Total T", "Total N", ...dayNumbers].join(",");
     csvContent += headerRow + "\r\n";
 
     employees.forEach(emp => {
-        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
+        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, N: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
         const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
-        const employeeRow = [emp.name, totals.D, totals.M, totals.T, shifts].join(",");
+        const employeeRow = [emp.name, totals.D, totals.M, totals.T, totals.N, shifts].join(",");
         csvContent += employeeRow + "\r\n";
     });
 
     csvContent += "\r\n";
 
-    csvContent += ["Total Mañana (TM)", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
-    csvContent += ["Total Tarde (TT)", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
-    csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+    csvContent += ["Total Mañana (TM)", "", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", "", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    csvContent += ["Total Noche (TN)", "", "", "", "", ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
+    csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -739,7 +750,7 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (shift === null) return "bg-destructive text-destructive-foreground"; // Highlight empty slots
+    if (shift === null) return "bg-destructive text-destructive-foreground"; 
     return SHIFT_COLORS[shift] || "bg-background";
   };
 
@@ -762,7 +773,7 @@ export default function Home() {
     ];
 
      const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
-     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C']));
+     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N']));
 
 
   return (
@@ -1206,7 +1217,7 @@ export default function Home() {
                             <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                 <div>
                                     <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
                                     <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
@@ -1216,12 +1227,20 @@ export default function Home() {
                                     <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
                                 <div>
+                                    <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
+                                    <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
                                     <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
                                     <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
                                 <div>
                                     <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
                                     <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
+                                <div>
+                                    <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
+                                    <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
                             </div>
                         </CardContent>
@@ -1250,7 +1269,7 @@ export default function Home() {
                             <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                 <div>
                                     <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
                                     <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
@@ -1263,8 +1282,12 @@ export default function Home() {
                                     <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
                                     <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
+                                 <div>
+                                    <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
+                                    <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
+                                </div>
                                 <div>
-                                    <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT)</Label>
+                                    <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT = M+T)</Label>
                                     <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
                             </div>
@@ -1360,6 +1383,11 @@ export default function Home() {
                             <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
+                        </TableRow>
+                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                         </TableRow>
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>

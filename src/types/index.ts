@@ -91,10 +91,10 @@ export interface ScheduleReport {
 export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800",
   T: "bg-blue-100 text-blue-800",
-  D: "bg-gray-200 text-gray-700",
+  D: "bg-green-100 text-green-800", // Changed to green
   F: "bg-purple-100 text-purple-800",
-  LM: "bg-red-100 text-red-800",
-  LAO: "bg-pink-100 text-pink-800",
+  LM: "bg-amber-100 text-amber-800", // Changed to soft orange (amber)
+  LAO: "bg-amber-100 text-amber-800", // Changed to soft orange (amber)
   C: "bg-teal-100 text-teal-800",
 };
 
@@ -113,3 +113,4 @@ export interface OperationalRules {
   minCoverageM: number;
   minCoverageT: number;
 }
+

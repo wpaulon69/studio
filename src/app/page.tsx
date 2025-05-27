@@ -408,7 +408,7 @@ export default function Home() {
               employeeNameFromCSV.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) ||
               employeeNameFromCSV.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())
               ) {
-            scheduleSectionEndIndex = i; // Mark end of employee data if a token is found
+            scheduleSectionEndIndex = i;
             break;
           }
 
@@ -474,7 +474,7 @@ export default function Home() {
                      if (!currentLineContent.trim() ||
                         currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
                         currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
-                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) || // Stop if another section starts
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) || 
                         currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
@@ -547,20 +547,76 @@ export default function Home() {
                 }
                 return existingEmp;
             });
-            loadedEmployees = employeesWithUpdatedConfig; // Replace with the updated list
+            loadedEmployees = employeesWithUpdatedConfig; 
             employeeConfigLoaded = true;
         }
 
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences([]); // Clear previous absences as employee IDs might have changed
+        setAbsences([]); 
+        setHolidays([]); // Reset holidays for this specific import type
+
+        // Load general configurations if present
+        let generalConfigsLoadedMessages: string[] = [];
+
+        const targetStaffingStartIndex = lines.findIndex(line => line.startsWith(CONFIG_TARGET_STAFFING_TOKEN));
+        if (targetStaffingStartIndex !== -1 && (targetStaffingStartIndex + 1) < lines.length) {
+            const dataLine = lines[targetStaffingStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 6) {
+                setTargetMWorkday(parseInt(values[0]) || 0);
+                setTargetTWorkday(parseInt(values[1]) || 0);
+                setTargetNWorkday(parseInt(values[2]) || 0);
+                setTargetMWeekendHoliday(parseInt(values[3]) || 0);
+                setTargetTWeekendHoliday(parseInt(values[4]) || 0);
+                setTargetNWeekendHoliday(parseInt(values[5]) || 0);
+                generalConfigsLoadedMessages.push("Dotación Objetivo cargada.");
+            }
+        }
+
+        const consecutivityRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN));
+        if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[consecutivityRulesStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 2) {
+                setMaxConsecutiveWork(parseInt(values[0]) || 1);
+                setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                generalConfigsLoadedMessages.push("Reglas Consecutividad cargadas.");
+            }
+        }
+
+        const operationalRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN));
+        if (operationalRulesStartIndex !== -1 && (operationalRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[operationalRulesStartIndex + 1];
+            const values = dataLine.split(';');
+             if (values.length === 5) {
+                setRequiredDdWeekends(parseInt(values[0]) || 0);
+                setMinCoverageTPT(parseInt(values[1]) || 0);
+                setMinCoverageM(parseInt(values[2]) || 0);
+                setMinCoverageT(parseInt(values[3]) || 0);
+                setMinCoverageN(parseInt(values[4]) || 0);
+                generalConfigsLoadedMessages.push("Reglas Operativas cargadas.");
+            }
+        }
+        
+        const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
+        if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
+            const dataLine = lines[nightShiftConfigStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 1) {
+                setIsNightShiftEnabled(values[0].trim().toLowerCase() === 'true');
+                generalConfigsLoadedMessages.push("Config. Turno Noche cargada.");
+            }
+        }
+
 
         let toastMessage = "";
         if (loadedEmployees.length > 0) {
-            const historyMessage = previousDatesForHistory.length > 0 ? `El historial de los últimos ${previousDatesForHistory.length} días también fue importado (si estaba disponible).` : "No se importó historial (mes/año no configurado para historial o CSV sin datos suficientes).";
-            const configMessage = employeeConfigLoaded ? "La configuración de empleados también fue cargada." : "No se encontró/cargó configuración de empleados desde el CSV.";
-            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s) desde el CSV. ${historyMessage} ${configMessage}`;
+            const historyMsg = previousDatesForHistory.length > 0 ? ` Historial importado.` : "";
+            const empConfigMsg = employeeConfigLoaded ? " Config. empleados cargada." : "";
+            const generalConfigMsg = generalConfigsLoadedMessages.length > 0 ? ` ${generalConfigsLoadedMessages.join(' ')}` : "";
+            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s).${historyMsg}${empConfigMsg}${generalConfigMsg}`;
             toast({ title: "Importación Exitosa", description: toastMessage });
         } else if (employeesProcessedFromCsv > 0) {
              toastMessage = `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`;
@@ -682,7 +738,7 @@ export default function Home() {
         if (employeeConfigStartIndex !== -1) {
             const configHeaderLine = lines[employeeConfigStartIndex];
             const configHeaderParts = configHeaderLine.split(';');
-            const configDataHeaders = configHeaderParts.slice(1); // Headers like "Nombre", "ElegibleFindeDD", etc.
+            const configDataHeaders = configHeaderParts.slice(1);
 
             const empNameIndexConfig = configDataHeaders.findIndex(h => h.trim() === 'Nombre');
             const eligFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'ElegibleFindeDD');
@@ -798,7 +854,7 @@ export default function Home() {
                     historyLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                     ) break;
 
-                const historyCells = historyLineContent.split(','); // Historial usa comas
+                const historyCells = historyLineContent.split(',');
                 const csvEmployeeName = historyCells[0]?.trim();
                 const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
@@ -845,7 +901,7 @@ export default function Home() {
         if (absencesStartIndex !== -1) {
             const absenceHeaderLine = lines[absencesStartIndex];
             const absenceHeaderParts = absenceHeaderLine.split(';');
-            const absenceDataHeaders = absenceHeaderParts.slice(1); // "NombreEmpleado", "Tipo", etc.
+            const absenceDataHeaders = absenceHeaderParts.slice(1);
 
             const empNameIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'NombreEmpleado');
             const typeIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'Tipo');
@@ -933,7 +989,7 @@ export default function Home() {
             const values = dataLine.split(';');
             if (values.length === 1) {
                 loadedIsNightShiftEnabled = values[0].trim().toLowerCase() === 'true';
-                setIsNightShiftEnabled(loadedIsNightShiftEnabled); // Update UI state
+                setIsNightShiftEnabled(loadedIsNightShiftEnabled);
                 nightShiftConfigLoaded = true;
             }
         }
@@ -1190,12 +1246,11 @@ export default function Home() {
     if (previousDatesForHistory.length > 0 && Object.keys(historyInputs).length > 0) {
         csvContent += "\r\n\r\n";
         const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'yyyy-MM-dd'))];
-        csvContent += historyHeaderCells.join(";") + "\r\n"; // Use semicolon for this header too
-
+        csvContent += historyHeaderCells.join(";") + "\r\n";
         employees.forEach(emp => {
             const empHistory = historyInputs[emp.id] || {};
             const historyRowValues = previousDatesForHistory.map(dateStr => empHistory[dateStr] || "");
-            csvContent += [emp.name, ...historyRowValues].join(",") + "\r\n"; // Data uses comma
+            csvContent += [emp.name, ...historyRowValues].join(",") + "\r\n";
         });
     }
 
@@ -1218,22 +1273,18 @@ export default function Home() {
         });
     }
 
-    // Save Target Staffing Configuration
     csvContent += "\r\n\r\n";
     csvContent += `${CONFIG_TARGET_STAFFING_TOKEN};targetMWorkday;targetTWorkday;targetNWorkday;targetMWeekendHoliday;targetTWeekendHoliday;targetNWeekendHoliday\r\n`;
     csvContent += `${targetMWorkday};${targetTWorkday};${targetNWorkday};${targetMWeekendHoliday};${targetTWeekendHoliday};${targetNWeekendHoliday}\r\n`;
 
-    // Save Consecutivity Rules Configuration
     csvContent += "\r\n\r\n";
     csvContent += `${CONFIG_CONSECUTIVITY_RULES_TOKEN};maxConsecutiveWork;maxConsecutiveRest\r\n`;
     csvContent += `${maxConsecutiveWork};${maxConsecutiveRest}\r\n`;
 
-    // Save Operational Rules Configuration
     csvContent += "\r\n\r\n";
     csvContent += `${CONFIG_OPERATIONAL_RULES_TOKEN};requiredDdWeekends;minCoverageTPT;minCoverageM;minCoverageT;minCoverageN\r\n`;
     csvContent += `${requiredDdWeekends};${minCoverageTPT};${minCoverageM};${minCoverageT};${minCoverageN}\r\n`;
 
-    // Save Night Shift Enabled Configuration
     csvContent += "\r\n\r\n";
     csvContent += `${CONFIG_NIGHT_SHIFT_TOKEN};isNightShiftEnabled\r\n`;
     csvContent += `${isNightShiftEnabled}\r\n`;
@@ -1476,7 +1527,7 @@ export default function Home() {
                                                                                     const newDays = checked
                                                                                         ? [...currentDays, day.value]
                                                                                         : currentDays.filter(d => d !== day.value);
-                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); // Default if N disabled
+                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); 
                                                                                     field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                                 }}
                                                                             />
@@ -1530,9 +1581,9 @@ export default function Home() {
                                             {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
                                         </ul>
                                         <div className="mt-4 space-y-4 border-t pt-4">
-                                            <h4 className="text-md font-semibold">Importar Lista de Empleados e Historial (Últimos 5 días Mes Anterior)</h4>
+                                            <h4 className="text-md font-semibold">Importar Lista de Empleados, Historial, Configuración y Reglas</h4>
                                             <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
-                                                <Upload className="mr-2 h-4 w-4" /> Importar Empleados e Historial CSV
+                                                <Upload className="mr-2 h-4 w-4" /> Importar Empleados, Historial, Config. y Reglas CSV
                                             </Button>
                                             <Input
                                             type="file"

@@ -763,7 +763,19 @@ export default function Home() {
     if (!schedule || !employees || selectedMonth === null || selectedYear === null) return;
 
     const monthName = MONTHS.find(m => m.value === selectedMonth)?.label.toUpperCase() || 'MesDesconocido';
-    const fileName = `horario_${monthName}_${selectedYear}.csv`;
+    const defaultFileName = `horario_${monthName}_${selectedYear}.csv`;
+    
+    let userFileName = window.prompt("Ingrese el nombre para el archivo CSV:", defaultFileName);
+
+    if (userFileName === null) { // User pressed Cancel
+        return;
+    }
+    if (userFileName.trim() === "") { // User entered empty string or only whitespace
+        userFileName = defaultFileName;
+    }
+    if (!userFileName.toLowerCase().endsWith(".csv")) {
+        userFileName += ".csv";
+    }
 
     let csvContent = "data:text/csv;charset=utf-8,";
 
@@ -784,10 +796,7 @@ export default function Home() {
 
     csvContent += "\r\n";
 
-    // Calculate the number of empty cells needed for the total rows
-    // It should be the number of fixed columns in the header minus 1 (for the label)
-    const numFixedHeaderColumns = headerBase.length;
-    const emptyCellsForTotalRowPlaceholders = Array(numFixedHeaderColumns - 1).fill("");
+    const emptyCellsForTotalRowPlaceholders = Array(headerBase.length - 1).fill("");
 
 
     csvContent += ["Total Mañana (TM)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
@@ -814,7 +823,7 @@ export default function Home() {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", fileName);
+    link.setAttribute("download", userFileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1490,25 +1499,25 @@ export default function Home() {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          {isNightShiftEnabled && (
                             <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                                 {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                             </TableRow>
                          )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
@@ -1548,4 +1557,5 @@ export default function Home() {
 
 
     
+
 

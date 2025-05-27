@@ -395,8 +395,8 @@ export default function Home() {
         let employeesProcessedFromCsv = 0;
 
         for (let i = 1; i < lines.length; i++) {
-          const line = lines[i];
-          const cells = line.split(',');
+          const lineContent = lines[i];
+          const cells = lineContent.split(',');
           const employeeNameFromCSV = cells[employeeNameIndex]?.trim();
 
           if (!employeeNameFromCSV ||
@@ -537,7 +537,8 @@ export default function Home() {
         if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length; 
 
         for (let i = 1; i < scheduleSectionEndIndex; i++) {
-            const cells = lines[i].split(',');
+            const lineContent = lines[i];
+            const cells = lineContent.split(',');
             const csvEmployeeName = cells[employeeNameColIndex]?.trim();
             if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())) {
                  scheduleSectionEndIndex = i; 
@@ -581,41 +582,79 @@ export default function Home() {
         const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
         if (employeeConfigStartIndex !== -1) {
             const configHeaderCells = lines[employeeConfigStartIndex].split(';');
-            const empIdIndex = configHeaderCells.findIndex(h => h.trim() === 'ID_Empleado');
-            const empNameIndex = configHeaderCells.findIndex(h => h.trim() === 'Nombre');
+            const empNameIndexConfig = configHeaderCells.findIndex(h => h.trim() === 'Nombre');
             const eligFindeIndex = configHeaderCells.findIndex(h => h.trim() === 'ElegibleFindeDD');
             const prefFindeIndex = configHeaderCells.findIndex(h => h.trim() === 'PrefiereTrabajarFinde');
             const turnoFijoIndex = configHeaderCells.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
             const asignFijasIndex = configHeaderCells.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
 
-            for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
-                const currentLine = lines[i];
-                if (!currentLine.trim() || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(ABSENCES_HEADER_TOKEN) || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN)) break;
-                const cells = currentLine.split(';');
-                
-                const csvEmpName = empNameIndex !== -1 && cells[empNameIndex] ? cells[empNameIndex].trim() : '';
-                const employeeToUpdate = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmpName.toLowerCase());
+            const employeesWithUpdatedConfig = currentEmployees.map(existingEmp => {
+                let employeeConfigDataRowCells: string[] | undefined;
 
-                if (employeeToUpdate) {
-                    if (eligFindeIndex !== -1 && cells[eligFindeIndex]) employeeToUpdate.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+                for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
+                    const currentLineContent = lines[i];
+                     if (!currentLineContent.trim() || 
+                        currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) || 
+                        currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) || 
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
+                       ) break;
+                    const cells = currentLineContent.split(';');
+                    const csvConfigEmpName = empNameIndexConfig !== -1 && cells[empNameIndexConfig] ? cells[empNameIndexConfig].trim() : '';
+                    if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
+                        employeeConfigDataRowCells = cells;
+                        break;
+                    }
+                }
+
+                if (employeeConfigDataRowCells) {
+                    const cells = employeeConfigDataRowCells;
+                    const updatedEmployee = { 
+                        ...existingEmp, 
+                        preferences: { 
+                            ...(existingEmp.preferences || {}),
+                            fixedAssignments: [], 
+                        }
+                    };
+
+                    if (eligFindeIndex !== -1 && cells[eligFindeIndex]) {
+                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+                    }
                     
-                    employeeToUpdate.preferences = employeeToUpdate.preferences || {}; // Ensure preferences object exists
-                    
-                    if (prefFindeIndex !== -1 && cells[prefFindeIndex]) employeeToUpdate.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    if (prefFindeIndex !== -1 && cells[prefFindeIndex]) {
+                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    }
                     
                     if (turnoFijoIndex !== -1 && cells[turnoFijoIndex] && cells[turnoFijoIndex].trim()) {
-                        try { employeeToUpdate.preferences.fixedWorkShift = JSON.parse(cells[turnoFijoIndex].trim()); } catch (e) { console.warn("Error parsing TurnoFijoSemanal_JSON for", csvEmpName, e); }
+                        try { 
+                            updatedEmployee.preferences.fixedWorkShift = JSON.parse(cells[turnoFijoIndex].trim()); 
+                        } catch (e) { 
+                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, e); 
+                            delete updatedEmployee.preferences.fixedWorkShift;
+                        }
                     } else {
-                        delete employeeToUpdate.preferences.fixedWorkShift; // Remove if empty in CSV
+                        delete updatedEmployee.preferences.fixedWorkShift;
                     }
 
                     if (asignFijasIndex !== -1 && cells[asignFijasIndex] && cells[asignFijasIndex].trim()) {
-                        try { employeeToUpdate.preferences.fixedAssignments = JSON.parse(cells[asignFijasIndex].trim()); } catch (e) { console.warn("Error parsing AsignacionesFijas_JSON for", csvEmpName, e); }
+                        try { 
+                            updatedEmployee.preferences.fixedAssignments = JSON.parse(cells[asignFijasIndex].trim()); 
+                        } catch (e) { 
+                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, e); 
+                            updatedEmployee.preferences.fixedAssignments = []; 
+                        }
                     } else {
-                        employeeToUpdate.preferences.fixedAssignments = []; // Set to empty array if empty in CSV
+                        updatedEmployee.preferences.fixedAssignments = [];
                     }
+                    return updatedEmployee;
                 }
-            }
+                return existingEmp;
+            });
+            
+            currentEmployees = employeesWithUpdatedConfig;
             employeeConfigLoaded = true;
         }
 
@@ -628,7 +667,7 @@ export default function Home() {
         if (historySectionStartIndex !== -1) {
             const historyHeaderLine = lines[historySectionStartIndex];
             const historyHeaderCells = historyHeaderLine.split(';'); 
-            const historyDateHeaders = historyHeaderCells.slice(1).map(h => h.trim()); // Get date headers
+            const historyDateHeaders = historyHeaderCells.slice(1).map(h => h.trim()); 
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
                 const historyLineContent = lines[i];
@@ -643,7 +682,7 @@ export default function Home() {
                     historyLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                     ) break; 
 
-                const historyCells = historyLineContent.split(','); // History data is comma-separated
+                const historyCells = historyLineContent.split(','); 
                 const csvEmployeeName = historyCells[0]?.trim();
                 const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
@@ -688,48 +727,32 @@ export default function Home() {
         const newAbsences: Absence[] = [];
         const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
         if (absencesStartIndex !== -1) {
+            const absenceHeaderCells = lines[absencesStartIndex].split(';');
+            const empNameIndexAbsence = absenceHeaderCells.findIndex(h => h.trim() === 'NombreEmpleado');
+
+
             for (let i = absencesStartIndex + 1; i < lines.length; i++) {
                 const currentLine = lines[i];
                  if (!currentLine.trim() || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
-                const [empIdStr, type, startDate, endDate] = currentLine.split(';');
-                const empIdFromCsv = parseInt(empIdStr); // This is the ID from the CSV
                 
-                // Find employee in the newly loaded list by name, as IDs might have changed.
-                // Assuming the 'employees' array (set before this section) contains up-to-date IDs.
-                // This part needs care: if employee names are not unique, this could be an issue.
-                // For now, let's find the employee in `currentEmployees` (which holds new IDs)
-                // based on the name that would correspond to `empIdFromCsv` in the *original* CSV.
-                // This is tricky. A better way would be if Employee Config section included original name.
-                // For now, we will assume that if an absence is for an employee ID, that ID should still be valid
-                // if the employee was loaded from the main schedule section.
-                // This means the CSV structure must be consistent: schedule first, then config using original IDs/names, then absences using original IDs.
+                const absenceCells = currentLine.split(';');
+                const csvEmpNameAbsence = empNameIndexAbsence !==-1 && absenceCells[empNameIndexAbsence] ? absenceCells[empNameIndexAbsence].trim() : '';
+                const type = absenceCells[empNameIndexAbsence + 1]?.trim(); // Assuming order: Name, Type, Start, End
+                const startDate = absenceCells[empNameIndexAbsence + 2]?.trim();
+                const endDate = absenceCells[empNameIndexAbsence + 3]?.trim();
                 
-                // The best way is to find the employee in `currentEmployees` whose *original* ID (if we had it) matched empIdFromCsv.
-                // Since we don't store original ID after reloading, we'll rely on the empIdFromCsv matching one of the newly generated IDs
-                // IF the config section was able to correctly match by name and potentially store the CSV ID.
-                // Given current logic, employeeToUpdate in config section matches by NAME.
-                // So, if an absence is for employee "Juan Perez" with original ID 123, and "Juan Perez" was loaded and given new ID 789,
-                // the absence needs to be linked to ID 789.
-                // The `empIdStr` in the absence CSV section should refer to the *original* ID.
-                // We need to find the employee in `currentEmployees` that corresponds to this original ID.
-                // Let's assume the config section has ALREADY updated the `currentEmployees` with preferences.
-                // We need a map from original CSV employee ID to new employee ID.
-                // This is getting complex. For now, let's assume the empIdFromCsv directly matches a new ID,
-                // which will likely fail if employees are re-ordered or names change.
-                // A more robust way: Employee Config section should also store original ID.
-                // For now, let's try a simpler match:
-                const employeeForAbsence = currentEmployees.find(e => e.id === empIdFromCsv); // This might not be robust.
+                const employeeForAbsence = currentEmployees.find(e => e.name.toLowerCase() === csvEmpNameAbsence.toLowerCase());
 
                 if (employeeForAbsence && type && startDate && endDate) {
                     newAbsences.push({
                         id: Date.now() + newAbsences.length,
-                        employeeId: employeeForAbsence.id, // Use the new ID
-                        type: type.trim() as "LAO" | "LM",
-                        startDate: startDate.trim(),
-                        endDate: endDate.trim(),
+                        employeeId: employeeForAbsence.id,
+                        type: type as "LAO" | "LM",
+                        startDate: startDate,
+                        endDate: endDate,
                     });
                 } else {
-                    console.warn(`Ausencia no cargada: ID de empleado ${empIdStr} no encontrado en la lista actual, o datos de ausencia incompletos.`);
+                    console.warn(`Ausencia no cargada: Empleado ${csvEmpNameAbsence} no encontrado, o datos de ausencia incompletos.`);
                 }
             }
             setAbsences(newAbsences);
@@ -741,7 +764,7 @@ export default function Home() {
         if (targetStaffingStartIndex !== -1 && (targetStaffingStartIndex + 1) < lines.length) {
             const dataLine = lines[targetStaffingStartIndex + 1];
             const values = dataLine.split(';');
-            if (values.length === 6) { // M, T, N for workday and M, T, N for weekend/holiday
+            if (values.length === 6) { 
                 setTargetMWorkday(parseInt(values[0]) || 0);
                 setTargetTWorkday(parseInt(values[1]) || 0);
                 setTargetNWorkday(parseInt(values[2]) || 0);
@@ -769,7 +792,7 @@ export default function Home() {
         if (operationalRulesStartIndex !== -1 && (operationalRulesStartIndex + 1) < lines.length) {
             const dataLine = lines[operationalRulesStartIndex + 1];
             const values = dataLine.split(';');
-             if (values.length === 5) { // D/D weekends, minTPT, minM, minT, minN
+             if (values.length === 5) { 
                 setRequiredDdWeekends(parseInt(values[0]) || 0);
                 setMinCoverageTPT(parseInt(values[1]) || 0);
                 setMinCoverageM(parseInt(values[2]) || 0);
@@ -780,7 +803,7 @@ export default function Home() {
         }
         
         let nightShiftConfigLoaded = false;
-        let loadedIsNightShiftEnabled = isNightShiftEnabled; // Default to current UI state
+        let loadedIsNightShiftEnabled = isNightShiftEnabled; 
 
         const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
         if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
@@ -797,7 +820,7 @@ export default function Home() {
         if (currentEmployees.length === 0) {
           throw new Error("No se encontraron empleados válidos en la sección principal del horario del CSV.");
         }
-        setEmployees(currentEmployees); // Ensure employee list with updated preferences is set
+        setEmployees(currentEmployees); 
 
 
         const currentTargetStaffing: TargetStaffing = {
@@ -1036,7 +1059,7 @@ export default function Home() {
     employees.forEach(emp => {
         const fixedWorkShiftJson = emp.preferences.fixedWorkShift ? JSON.stringify(emp.preferences.fixedWorkShift) : "";
         const fixedAssignmentsJson = emp.preferences.fixedAssignments ? JSON.stringify(emp.preferences.fixedAssignments) : "";
-        csvContent += `${emp.id};${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};${fixedWorkShiftJson};${fixedAssignmentsJson}\r\n`;
+        csvContent += `${emp.id};${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};"${fixedWorkShiftJson.replace(/"/g, '""')}";"${fixedAssignmentsJson.replace(/"/g, '""')}"\r\n`;
     });
     
     
@@ -1065,9 +1088,10 @@ export default function Home() {
     
     if (absences.length > 0) {
         csvContent += "\r\n\r\n";
-        csvContent += `${ABSENCES_HEADER_TOKEN};ID_Empleado;Tipo;FechaInicio;FechaFin\r\n`;
+        csvContent += `${ABSENCES_HEADER_TOKEN};NombreEmpleado;Tipo;FechaInicio;FechaFin\r\n`;
         absences.forEach(abs => {
-            csvContent += `${abs.employeeId};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
+            const empName = employees.find(e => e.id === abs.employeeId)?.name || `ID_${abs.employeeId}`;
+            csvContent += `${empName};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
         });
     }
 
@@ -1826,6 +1850,5 @@ export default function Home() {
     </div>
   );
 }
-
 
     

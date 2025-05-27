@@ -775,29 +775,27 @@ export default function Home() {
 
     employees.forEach(emp => {
         const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, N: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
-        const dailyShiftsArray = schedule.days.map(day => day.shifts[emp.id] || ""); // Array of shifts
+        const dailyShiftsArray = schedule.days.map(day => day.shifts[emp.id] || ""); 
         const employeeRowBase = [emp.name, totals.D, totals.M, totals.T];
         if(isNightShiftEnabled) employeeRowBase.push(totals.N);
-        const employeeRow = [...employeeRowBase, ...dailyShiftsArray].join(","); // Spread dailyShiftsArray
+        const employeeRow = [...employeeRowBase, ...dailyShiftsArray].join(","); 
         csvContent += employeeRow + "\r\n";
     });
 
     csvContent += "\r\n";
 
-    const emptyTotalCellsBaseCount = 1 // For "Empleado" column
-                                + 1 // For "Total D"
-                                + 1 // For "Total M"
-                                + 1; // For "Total T"
-    const emptyTotalCellsCount = isNightShiftEnabled ? emptyTotalCellsBaseCount + 1 : emptyTotalCellsBaseCount;
-    const emptyTotalCells = Array(emptyTotalCellsCount).fill("");
+    // Calculate the number of empty cells needed for the total rows
+    // It should be the number of fixed columns in the header minus 1 (for the label)
+    const numFixedHeaderColumns = headerBase.length;
+    const emptyCellsForTotalRowPlaceholders = Array(numFixedHeaderColumns - 1).fill("");
 
 
-    csvContent += ["Total Mañana (TM)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
-    csvContent += ["Total Tarde (TT)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    csvContent += ["Total Mañana (TM)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
     if (isNightShiftEnabled) {
-        csvContent += ["Total Noche (TN)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
+        csvContent += ["Total Noche (TN)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
     }
-    csvContent += ["TOTAL PERSONAL (TPT)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+    csvContent += ["TOTAL PERSONAL (TPT)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
     // Add history section
     const previousDatesForHistory = getPreviousMonthDates();
@@ -1550,3 +1548,4 @@ export default function Home() {
 
 
     
+

@@ -34,6 +34,10 @@ const HISTORY_CSV_HEADER_TOKEN = "HISTORIAL_MES_ANTERIOR_EMPLEADO_V1"; // V1 for
 const EMPLOYEE_CONFIG_HEADER_TOKEN = "CONFIGURACION_EMPLEADOS_V1";
 const HOLIDAYS_HEADER_TOKEN = "FERIADOS_V1";
 const ABSENCES_HEADER_TOKEN = "AUSENCIAS_V1";
+const CONFIG_TARGET_STAFFING_TOKEN = "CONFIGURACION_DOTACION_OBJETIVO_V1";
+const CONFIG_CONSECUTIVITY_RULES_TOKEN = "CONFIGURACION_REGLAS_CONSECUTIVIDAD_V1";
+const CONFIG_OPERATIONAL_RULES_TOKEN = "CONFIGURACION_REGLAS_OPERATIVAS_V1";
+const CONFIG_NIGHT_SHIFT_TOKEN = "CONFIGURACION_TURNO_NOCHE_V1";
 
 
 const defaultAbsences: Absence[] = [];
@@ -510,13 +514,11 @@ export default function Home() {
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
         let detectedCsvFirstShiftColIndex: number;
-        let csvHasNightColumn = false;
         const totalTIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'total t');
         if (totalTIndex === -1) throw new Error("Columna 'Total T' no encontrada en el encabezado del CSV. Formato de archivo no reconocido.");
 
         if ((totalTIndex + 1) < headerCells.length && headerCells[totalTIndex + 1].trim().toLowerCase() === 'total n') {
             detectedCsvFirstShiftColIndex = totalTIndex + 2;
-            csvHasNightColumn = true;
         } else {
             detectedCsvFirstShiftColIndex = totalTIndex + 1;
         }
@@ -587,16 +589,16 @@ export default function Home() {
             const asignFijasIndex = configHeaderCells.findIndex(h => h === 'AsignacionesFijas_JSON');
 
             for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
-                const line = lines[i];
-                if (!line.trim() || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN) || line.startsWith(HISTORY_CSV_HEADER_TOKEN)) break;
-                const cells = line.split(';');
-                const csvEmpId = empIdIndex !== -1 ? parseInt(cells[empIdIndex]) : NaN;
+                const currentLine = lines[i];
+                if (!currentLine.trim() || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(ABSENCES_HEADER_TOKEN) || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN)) break;
+                const cells = currentLine.split(';');
+                const csvEmpId = empIdIndex !== -1 && cells[empIdIndex] ? parseInt(cells[empIdIndex]) : NaN;
                 const csvEmpName = empNameIndex !== -1 ? cells[empNameIndex] : '';
 
                 const employeeToUpdate = currentEmployees.find(emp => emp.id === csvEmpId || emp.name === csvEmpName);
                 if (employeeToUpdate) {
-                    if (eligFindeIndex !== -1) employeeToUpdate.eligibleWeekend = cells[eligFindeIndex]?.toLowerCase() === 'true';
-                    if (prefFindeIndex !== -1) employeeToUpdate.preferences.preferWeekendWork = cells[prefFindeIndex]?.toLowerCase() === 'true';
+                    if (eligFindeIndex !== -1 && cells[eligFindeIndex]) employeeToUpdate.eligibleWeekend = cells[eligFindeIndex]?.toLowerCase() === 'true';
+                    if (prefFindeIndex !== -1 && cells[prefFindeIndex]) employeeToUpdate.preferences.preferWeekendWork = cells[prefFindeIndex]?.toLowerCase() === 'true';
                     if (turnoFijoIndex !== -1 && cells[turnoFijoIndex]) {
                         try { employeeToUpdate.preferences.fixedWorkShift = JSON.parse(cells[turnoFijoIndex]); } catch (e) { console.warn("Error parsing TurnoFijoSemanal_JSON for", csvEmpName, e); }
                     }
@@ -621,14 +623,16 @@ export default function Home() {
             const historyDateHeaders = historyHeaderCells.slice(1); 
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
-                const historyLine = lines[i];
-                if (!historyLine.trim() || 
-                    historyLine.toLowerCase().startsWith("total") || 
-                    historyLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || 
-                    historyLine.startsWith(HOLIDAYS_HEADER_TOKEN) || 
-                    historyLine.startsWith(ABSENCES_HEADER_TOKEN)) break; 
+                const historyLineContent = lines[i];
+                if (!historyLineContent.trim() || 
+                    historyLineContent.toLowerCase().startsWith("total") || 
+                    historyLineContent.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || 
+                    historyLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) || 
+                    historyLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
+                    historyLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN)
+                    ) break; 
 
-                const historyCells = historyLine.split(','); 
+                const historyCells = historyLineContent.split(','); 
                 const csvEmployeeName = historyCells[0]?.trim();
                 const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
@@ -656,9 +660,9 @@ export default function Home() {
         const holidaysStartIndex = lines.findIndex(line => line.startsWith(HOLIDAYS_HEADER_TOKEN));
         if (holidaysStartIndex !== -1) {
             for (let i = holidaysStartIndex + 1; i < lines.length; i++) {
-                const line = lines[i];
-                if (!line.trim() || line.startsWith(ABSENCES_HEADER_TOKEN) || line.startsWith(HISTORY_CSV_HEADER_TOKEN) || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN)) break;
-                const [date, ...descriptionParts] = line.split(';');
+                const currentLine = lines[i];
+                if (!currentLine.trim() || currentLine.startsWith(ABSENCES_HEADER_TOKEN) || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN)) break;
+                const [date, ...descriptionParts] = currentLine.split(';');
                 const description = descriptionParts.join(';'); 
                 if (date && description) {
                     newHolidays.push({ id: Date.now() + newHolidays.length, date: date.trim(), description: description.trim() });
@@ -674,9 +678,9 @@ export default function Home() {
         const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
         if (absencesStartIndex !== -1) {
             for (let i = absencesStartIndex + 1; i < lines.length; i++) {
-                const line = lines[i];
-                 if (!line.trim() || line.startsWith(HISTORY_CSV_HEADER_TOKEN) || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN)) break;
-                const [empIdStr, type, startDate, endDate] = line.split(';');
+                const currentLine = lines[i];
+                 if (!currentLine.trim() || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN)) break;
+                const [empIdStr, type, startDate, endDate] = currentLine.split(';');
                 const empId = parseInt(empIdStr);
                 if (!isNaN(empId) && type && startDate && endDate && currentEmployees.find(e => e.id === empId)) {
                     newAbsences.push({
@@ -690,6 +694,60 @@ export default function Home() {
             }
             setAbsences(newAbsences);
             absencesLoaded = newAbsences.length > 0;
+        }
+
+        let targetStaffingLoaded = false;
+        const targetStaffingStartIndex = lines.findIndex(line => line.startsWith(CONFIG_TARGET_STAFFING_TOKEN));
+        if (targetStaffingStartIndex !== -1 && (targetStaffingStartIndex + 1) < lines.length) {
+            const dataLine = lines[targetStaffingStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 6) { // M, T, N for workday and M, T, N for weekend/holiday
+                setTargetMWorkday(parseInt(values[0]) || 0);
+                setTargetTWorkday(parseInt(values[1]) || 0);
+                setTargetNWorkday(parseInt(values[2]) || 0);
+                setTargetMWeekendHoliday(parseInt(values[3]) || 0);
+                setTargetTWeekendHoliday(parseInt(values[4]) || 0);
+                setTargetNWeekendHoliday(parseInt(values[5]) || 0);
+                targetStaffingLoaded = true;
+            }
+        }
+
+        let consecutivityRulesLoaded = false;
+        const consecutivityRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN));
+        if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[consecutivityRulesStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 2) {
+                setMaxConsecutiveWork(parseInt(values[0]) || 1);
+                setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                consecutivityRulesLoaded = true;
+            }
+        }
+
+        let operationalRulesLoaded = false;
+        const operationalRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN));
+        if (operationalRulesStartIndex !== -1 && (operationalRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[operationalRulesStartIndex + 1];
+            const values = dataLine.split(';');
+             if (values.length === 5) { // D/D weekends, minTPT, minM, minT, minN
+                setRequiredDdWeekends(parseInt(values[0]) || 0);
+                setMinCoverageTPT(parseInt(values[1]) || 0);
+                setMinCoverageM(parseInt(values[2]) || 0);
+                setMinCoverageT(parseInt(values[3]) || 0);
+                setMinCoverageN(parseInt(values[4]) || 0);
+                operationalRulesLoaded = true;
+            }
+        }
+        
+        let nightShiftConfigLoaded = false;
+        const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
+        if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
+            const dataLine = lines[nightShiftConfigStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 1) {
+                setIsNightShiftEnabled(values[0] === 'true');
+                nightShiftConfigLoaded = true;
+            }
         }
 
 
@@ -722,10 +780,14 @@ export default function Home() {
         setReport(newReport);
         setDisplayMode('viewing');
         let toastMessages = [`Horario cargado para ${currentEmployees.length} empleado(s).`];
-        if (employeeConfigLoaded) toastMessages.push("Configuración de empleados cargada.");
-        if (historyLoaded) toastMessages.push("Historial del mes anterior cargado.");
+        if (employeeConfigLoaded) toastMessages.push("Config. empleados cargada.");
+        if (historyLoaded) toastMessages.push("Historial cargado.");
         if (holidaysLoaded) toastMessages.push(`${newHolidays.length} feriado(s) cargado(s).`);
         if (absencesLoaded) toastMessages.push(`${newAbsences.length} ausencia(s) cargada(s).`);
+        if (targetStaffingLoaded) toastMessages.push("Dotación objetivo cargada.");
+        if (consecutivityRulesLoaded) toastMessages.push("Reglas consecutividad cargadas.");
+        if (operationalRulesLoaded) toastMessages.push("Reglas operativas cargadas.");
+        if (nightShiftConfigLoaded) toastMessages.push("Config. turno noche cargada.");
         
         toast({ title: "Horario Cargado Completamente", description: toastMessages.join(' ') });
 
@@ -965,6 +1027,27 @@ export default function Home() {
             csvContent += `${abs.employeeId};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
         });
     }
+
+    // Save Target Staffing Configuration
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_TARGET_STAFFING_TOKEN};targetMWorkday;targetTWorkday;targetNWorkday;targetMWeekendHoliday;targetTWeekendHoliday;targetNWeekendHoliday\r\n`;
+    csvContent += `${targetMWorkday};${targetTWorkday};${targetNWorkday};${targetMWeekendHoliday};${targetTWeekendHoliday};${targetNWeekendHoliday}\r\n`;
+
+    // Save Consecutivity Rules Configuration
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_CONSECUTIVITY_RULES_TOKEN};maxConsecutiveWork;maxConsecutiveRest\r\n`;
+    csvContent += `${maxConsecutiveWork};${maxConsecutiveRest}\r\n`;
+
+    // Save Operational Rules Configuration
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_OPERATIONAL_RULES_TOKEN};requiredDdWeekends;minCoverageTPT;minCoverageM;minCoverageT;minCoverageN\r\n`;
+    csvContent += `${requiredDdWeekends};${minCoverageTPT};${minCoverageM};${minCoverageT};${minCoverageN}\r\n`;
+
+    // Save Night Shift Enabled Configuration
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_NIGHT_SHIFT_TOKEN};isNightShiftEnabled\r\n`;
+    csvContent += `${isNightShiftEnabled}\r\n`;
+
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
@@ -1700,3 +1783,4 @@ export default function Home() {
     </div>
   );
 }
+

@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSchedule as initializeScheduleLib } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
@@ -124,6 +123,7 @@ function isAbsenceRangeValid(startDateStr: string, endDateStr: string, currentYe
 // --- Component ---
 export default function Home() {
   const [displayMode, setDisplayMode] = useState<'config' | 'viewing'>('config');
+  const [currentStep, setCurrentStep] = useState<number>(1);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -605,6 +605,7 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
                     const dataCells = currentLineContent.split(';');
+                    // Ensure empNameIndexConfig is valid and dataCells is long enough
                     const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRow = currentLineContent;
@@ -909,6 +910,7 @@ export default function Home() {
     if (employees.length === 0) {
         toast({ title: "Error de Configuración", description: "No hay empleados definidos. Por favor, agregue empleados o impórtelos desde un CSV.", variant: "destructive" });
         setDisplayMode('config');
+        setCurrentStep(1);
         return;
     }
     setIsLoading(true);
@@ -1078,7 +1080,6 @@ export default function Home() {
 
 
     csvContent += "\r\n\r\n";
-    // Note: Removed ID_Empleado from header for employee config to simplify matching by name.
     csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
     employees.forEach(emp => {
         const fixedWorkShiftJson = emp.preferences.fixedWorkShift ? JSON.stringify(emp.preferences.fixedWorkShift) : "null";
@@ -1203,541 +1204,570 @@ export default function Home() {
         return isNightShiftEnabled ? baseOptions : baseOptions.filter(opt => opt.value !== 'N');
     }, [isNightShiftEnabled]);
 
+    const getStepTitle = () => {
+        switch (currentStep) {
+            case 1: return "Paso 1 de 3: Período y Personal";
+            case 2: return "Paso 2 de 3: Dotación Objetivo";
+            case 3: return "Paso 3 de 3: Reglas y Generación";
+            default: return "Ayuda horarios - Configuración";
+        }
+    };
 
   return (
     <div className="container mx-auto p-4 md:p-8">
        {displayMode === 'config' && (
             <Card className="mb-8 shadow-md">
                 <CardHeader>
-                <CardTitle className="text-2xl font-bold text-primary">Ayuda horarios - Configuración</CardTitle>
+                <CardTitle className="text-2xl font-bold text-primary">{getStepTitle()}</CardTitle>
                 <CardDescription>Configure los parámetros para la generación del horario o cargue uno existente.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <div className="flex flex-col md:flex-row gap-4 items-end">
-                        <div className="flex gap-4 w-full md:w-auto">
-                            <div className="flex-1">
-                                <Label htmlFor="month-select">Mes</Label>
-                                <Select
-                                    value={selectedMonth?.toString() || ""}
-                                    onValueChange={(value) => setSelectedMonth(parseInt(value))}
-                                    disabled={!isDateInitialized}
-                                >
-                                    <SelectTrigger id="month-select">
-                                        <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {MONTHS.map(m => (
-                                            <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                    {currentStep === 1 && (
+                        <>
+                            <div className="flex flex-col md:flex-row gap-4 items-end justify-between">
+                                <div className="flex gap-4 w-full md:w-auto">
+                                    <div className="flex-1">
+                                        <Label htmlFor="month-select">Mes</Label>
+                                        <Select
+                                            value={selectedMonth?.toString() || ""}
+                                            onValueChange={(value) => setSelectedMonth(parseInt(value))}
+                                            disabled={!isDateInitialized}
+                                        >
+                                            <SelectTrigger id="month-select">
+                                                <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {MONTHS.map(m => (
+                                                    <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="flex-1">
+                                        <Label htmlFor="year-select">Año</Label>
+                                        <Select
+                                            value={selectedYear?.toString() || ""}
+                                            onValueChange={(value) => setSelectedYear(parseInt(value))}
+                                            disabled={!isDateInitialized}
+                                        >
+                                            <SelectTrigger id="year-select">
+                                            <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                            {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
+                                                <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                                            ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                                     <Button
+                                        variant="outline"
+                                        onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
+                                        disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
+                                        className="flex-1"
+                                    >
+                                        <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV Completo
+                                    </Button>
+                                    <Input
+                                        type="file"
+                                        id="fullScheduleImportInput"
+                                        className="hidden"
+                                        accept=".csv"
+                                        onChange={handleLoadFullScheduleFromCSV}
+                                    />
+                                </div>
                             </div>
-                            <div className="flex-1">
-                                <Label htmlFor="year-select">Año</Label>
-                                <Select
-                                    value={selectedYear?.toString() || ""}
-                                    onValueChange={(value) => setSelectedYear(parseInt(value))}
-                                    disabled={!isDateInitialized}
-                                >
-                                    <SelectTrigger id="year-select">
-                                    <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                    {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
-                                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                                    ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                            <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
-                                {isLoading ? 'Generando...' : 'Generar Horario'}
-                            </Button>
-                            <Button
-                                variant="outline"
-                                onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
-                                disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
-                                className="flex-1"
-                            >
-                                <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV
-                            </Button>
-                            <Input
-                                type="file"
-                                id="fullScheduleImportInput"
-                                className="hidden"
-                                accept=".csv"
-                                onChange={handleLoadFullScheduleFromCSV}
-                            />
-                        </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Empleados</CardTitle>
-                                <Dialog open={isEmployeeDialogOpen} onOpenChange={(isOpen) => {
-                                    setIsEmployeeDialogOpen(isOpen);
-                                    if (!isOpen) {
-                                        setEditingEmployee(null);
-                                        employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }});
-                                    }
-                                }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); setIsEmployeeDialogOpen(true);}}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label htmlFor="name">Nombre</Label>
-                                                    <Input id="name" {...employeeForm.register("name")} />
-                                                    {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
-                                                </div>
-                                                <div className="flex items-center pt-6 space-x-2">
-                                                <Controller
-                                                        name="eligibleWeekend"
-                                                        control={employeeForm.control}
-                                                        render={({ field }) => (
-                                                            <Checkbox
-                                                                id="eligibleWeekend"
-                                                                checked={field.value}
-                                                                onCheckedChange={field.onChange}
-                                                            />
-                                                        )}
-                                                    />
-                                                    <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
-                                                </div>
-                                            </div>
-
-                                            <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                <div className="flex items-center space-x-2">
-                                                    <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                                    <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
-                                                </div>
-
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <Label>Asignaciones Fijas</Label>
-                                                {fixedAssignmentsFields.map((field, index) => (
-                                                    <div key={field.id} className="flex gap-2 items-center">
-                                                        <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Empleados</CardTitle>
+                                        <Dialog open={isEmployeeDialogOpen} onOpenChange={(isOpen) => {
+                                            setIsEmployeeDialogOpen(isOpen);
+                                            if (!isOpen) {
+                                                setEditingEmployee(null);
+                                                employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }});
+                                            }
+                                        }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); setIsEmployeeDialogOpen(true);}}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <Label htmlFor="name">Nombre</Label>
+                                                            <Input id="name" {...employeeForm.register("name")} />
+                                                            {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
+                                                        </div>
+                                                        <div className="flex items-center pt-6 space-x-2">
                                                         <Controller
-                                                            name={`preferences.fixedAssignments.${index}.shift`}
+                                                                name="eligibleWeekend"
+                                                                control={employeeForm.control}
+                                                                render={({ field }) => (
+                                                                    <Checkbox
+                                                                        id="eligibleWeekend"
+                                                                        checked={field.value}
+                                                                        onCheckedChange={field.onChange}
+                                                                    />
+                                                                )}
+                                                            />
+                                                            <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
+                                                        </div>
+                                                    </div>
+
+                                                    <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                        <div className="flex items-center space-x-2">
+                                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
+                                                            <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
+                                                        </div>
+
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Asignaciones Fijas</Label>
+                                                        {fixedAssignmentsFields.map((field, index) => (
+                                                            <div key={field.id} className="flex gap-2 items-center">
+                                                                <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                                <Controller
+                                                                    name={`preferences.fixedAssignments.${index}.shift`}
+                                                                    control={employeeForm.control}
+                                                                    render={({ field }) => (
+                                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                            <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {currentAllowedFixedShifts.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    )}
+                                                                />
+                                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                            </div>
+                                                        ))}
+                                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
+                                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
+
+                                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
+                                                    </div>
+
+
+                                                    <div className="space-y-2 border-t pt-4">
+                                                        <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
+                                                        <Controller
+                                                            name="preferences.fixedWorkShift"
                                                             control={employeeForm.control}
                                                             render={({ field }) => (
-                                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                                    <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                            <div className="space-y-2">
+                                                                <Label className="text-xs">Días de la Semana</Label>
+                                                                <div className="grid grid-cols-3 gap-2">
+                                                                    {daysOfWeekOptions.map(day => (
+                                                                        <div key={day.value} className="flex items-center space-x-2">
+                                                                            <Checkbox
+                                                                                id={`fixedDay-${day.value}`}
+                                                                                checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
+                                                                                onCheckedChange={(checked) => {
+                                                                                    const currentDays = field.value?.dayOfWeek ?? [];
+                                                                                    const newDays = checked
+                                                                                        ? [...currentDays, day.value]
+                                                                                        : currentDays.filter(d => d !== day.value);
+                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); // Default if N disabled
+                                                                                    field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
+                                                                                }}
+                                                                            />
+                                                                            <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <Label className="text-xs">Turno Fijo</Label>
+                                                                <Select
+                                                                    value={field.value?.shift}
+                                                                    onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })}
+                                                                    disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0}
+                                                                >
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                                     <SelectContent>
-                                                                        {currentAllowedFixedShifts.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                        {currentWeeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                                <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                                            </div>
+                                                            )}
+                                                        />
+                                                    </div>
+
+
+                                                    <DialogFooter>
+                                                        <DialogClose asChild>
+                                                            <Button type="button" variant="outline">Cancelar</Button>
+                                                        </DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                            {employees.map(emp => (
+                                                <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                    {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
+                                                    <div className="flex gap-1">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </li>
+                                            ))}
+                                            {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
+                                        </ul>
+                                        <div className="mt-4 space-y-4 border-t pt-4">
+                                            <h4 className="text-md font-semibold">Importar Lista de Empleados e Historial (Últimos 5 días Mes Anterior)</h4>
+                                            <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
+                                                <Upload className="mr-2 h-4 w-4" /> Importar Empleados e Historial CSV
+                                            </Button>
+                                            <Input
+                                            type="file"
+                                            id="csvImportInput"
+                                            className="hidden"
+                                            accept=".csv"
+                                            onChange={handleImportHistoryFromCSV}
+                                            />
+                                            {employees.length > 0 && getPreviousMonthDates().length > 0 && (
+                                            <>
+                                            <p className="text-xs text-muted-foreground">Edite el historial importado si es necesario:</p>
+                                            {employees.map(emp => (
+                                                <div key={`hist-${emp.id}`} className="space-y-1">
+                                                    <p className="text-sm font-medium">{emp.name}</p>
+                                                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                                        {getPreviousMonthDates().map(dateStr => (
+                                                            <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
+                                                                <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
+                                                                <Select
+                                                                    value={historyInputs[emp.id]?.[dateStr] || '-'}
+                                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
+                                                                >
+                                                                    <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
+                                                                        <SelectValue placeholder="-" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="-">- (Vacío)</SelectItem>
+                                                                        {SHIFT_TYPES.filter(st => isNightShiftEnabled || st !== 'N').map(st => (
+                                                                            <SelectItem key={st} value={st}>{st}</SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            </>
+                                            )}
+                                            {employees.length > 0 && getPreviousMonthDates().length === 0 && (
+                                            <p className="text-xs text-muted-foreground">Seleccione mes/año principal para ver/editar historial del mes anterior.</p>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
+                                        <Dialog open={isAbsenceDialogOpen} onOpenChange={(isOpen) => {
+                                            setIsAbsenceDialogOpen(isOpen);
+                                            if (!isOpen) {
+                                                setEditingAbsence(null);
+                                                absenceForm.reset();
+                                            }
+                                        }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }} disabled={employees.length === 0}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
+                                                    <div>
+                                                        <Label htmlFor="employeeId">Empleado</Label>
+                                                        <Controller
+                                                            name="employeeId"
+                                                            control={absenceForm.control}
+                                                            render={({ field }) => (
+                                                                <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
                                                                     </SelectContent>
                                                                 </Select>
                                                             )}
                                                         />
-                                                        <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                        {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
                                                     </div>
-                                                ))}
-                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
-                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
-
-                                                <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
-                                            </div>
-
-
-                                            <div className="space-y-2 border-t pt-4">
-                                                <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
-                                                <Controller
-                                                    name="preferences.fixedWorkShift"
-                                                    control={employeeForm.control}
-                                                    render={({ field }) => (
-                                                    <div className="space-y-2">
-                                                        <Label className="text-xs">Días de la Semana</Label>
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            {daysOfWeekOptions.map(day => (
-                                                                <div key={day.value} className="flex items-center space-x-2">
-                                                                    <Checkbox
-                                                                        id={`fixedDay-${day.value}`}
-                                                                        checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
-                                                                        onCheckedChange={(checked) => {
-                                                                            const currentDays = field.value?.dayOfWeek ?? [];
-                                                                            const newDays = checked
-                                                                                ? [...currentDays, day.value]
-                                                                                : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); // Default if N disabled
-                                                                            field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
-                                                                        }}
-                                                                    />
-                                                                    <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
-                                                                </div>
-                                                            ))}
+                                                    <div>
+                                                        <Label htmlFor="type">Tipo</Label>
+                                                        <Controller
+                                                            name="type"
+                                                            control={absenceForm.control}
+                                                            render={({ field }) => (
+                                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="LAO">LAO</SelectItem>
+                                                                        <SelectItem value="LM">LM</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )} />
+                                                        {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="startDate">Fecha Inicio</Label>
+                                                        <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
+                                                        {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="endDate">Fecha Fin</Label>
+                                                        <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
+                                                        {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                        {absences.map(abs => {
+                                                const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
+                                                let formattedStart = 'Invalid Date';
+                                                let formattedEnd = 'Invalid Date';
+                                                try {
+                                                    formattedStart = format(parseISO(abs.startDate), 'dd/MM');
+                                                    formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
+                                                } catch (e) {
+                                                    console.error("Invalid date format in absence:", abs);
+                                                }
+                                                return (
+                                                    <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                        <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
+                                                        <div className="flex gap-1">
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
+                                                                <Edit className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
                                                         </div>
-                                                        <Label className="text-xs">Turno Fijo</Label>
-                                                        <Select
-                                                            value={field.value?.shift}
-                                                            onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })}
-                                                            disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0}
-                                                        >
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {currentWeeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                                    </li>
+                                                );
+                                        })}
+                                            {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
+                                        </ul>
+                                    </CardContent>
+                                </Card>
+
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Feriados</CardTitle>
+                                        <Dialog open={isHolidayDialogOpen} onOpenChange={(isOpen) => {
+                                                setIsHolidayDialogOpen(isOpen);
+                                                if (!isOpen) {
+                                                    setEditingHoliday(null);
+                                                    holidayForm.reset();
+                                                }
+                                            }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); setIsHolidayDialogOpen(true); }}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="sm:max-w-[425px]">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
+                                                    <div>
+                                                        <Label htmlFor="holidayDate">Fecha</Label>
+                                                        <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
+                                                        {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
                                                     </div>
-                                                    )}
-                                                />
-                                            </div>
-
-
-                                            <DialogFooter>
-                                                <DialogClose asChild>
-                                                    <Button type="button" variant="outline">Cancelar</Button>
-                                                </DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                    {employees.map(emp => (
-                                        <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                            {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
-                                            <div className="flex gap-1">
-                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </li>
-                                    ))}
-                                    {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
-                                </ul>
-                                <div className="mt-4 space-y-4 border-t pt-4">
-                                    <h4 className="text-md font-semibold">Importar Lista de Empleados e Historial (Últimos 5 días Mes Anterior)</h4>
-                                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
-                                        <Upload className="mr-2 h-4 w-4" /> Importar Empleados e Historial CSV
-                                    </Button>
-                                    <Input
-                                      type="file"
-                                      id="csvImportInput"
-                                      className="hidden"
-                                      accept=".csv"
-                                      onChange={handleImportHistoryFromCSV}
-                                    />
-                                    {employees.length > 0 && getPreviousMonthDates().length > 0 && (
-                                      <>
-                                      <p className="text-xs text-muted-foreground">Edite el historial importado si es necesario:</p>
-                                      {employees.map(emp => (
-                                          <div key={`hist-${emp.id}`} className="space-y-1">
-                                              <p className="text-sm font-medium">{emp.name}</p>
-                                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                                                  {getPreviousMonthDates().map(dateStr => (
-                                                      <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
-                                                          <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
-                                                          <Select
-                                                              value={historyInputs[emp.id]?.[dateStr] || '-'}
-                                                              onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
-                                                          >
-                                                              <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
-                                                                  <SelectValue placeholder="-" />
-                                                              </SelectTrigger>
-                                                              <SelectContent>
-                                                                  <SelectItem value="-">- (Vacío)</SelectItem>
-                                                                  {SHIFT_TYPES.filter(st => isNightShiftEnabled || st !== 'N').map(st => (
-                                                                      <SelectItem key={st} value={st}>{st}</SelectItem>
-                                                                  ))}
-                                                              </SelectContent>
-                                                          </Select>
-                                                      </div>
-                                                  ))}
-                                              </div>
-                                          </div>
-                                      ))}
-                                      </>
-                                    )}
-                                    {employees.length > 0 && getPreviousMonthDates().length === 0 && (
-                                      <p className="text-xs text-muted-foreground">Seleccione mes/año principal para ver/editar historial del mes anterior.</p>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
-                                 <Dialog open={isAbsenceDialogOpen} onOpenChange={(isOpen) => {
-                                    setIsAbsenceDialogOpen(isOpen);
-                                    if (!isOpen) {
-                                        setEditingAbsence(null);
-                                        absenceForm.reset();
-                                    }
-                                }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }} disabled={employees.length === 0}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                <DialogContent className="sm:max-w-[425px]">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
-                                            <div>
-                                                <Label htmlFor="employeeId">Empleado</Label>
-                                                <Controller
-                                                    name="employeeId"
-                                                    control={absenceForm.control}
-                                                    render={({ field }) => (
-                                                        <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
-                                                />
-                                                {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="type">Tipo</Label>
-                                                <Controller
-                                                    name="type"
-                                                    control={absenceForm.control}
-                                                    render={({ field }) => (
-                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="LAO">LAO</SelectItem>
-                                                                <SelectItem value="LM">LM</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )} />
-                                                {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="startDate">Fecha Inicio</Label>
-                                                <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
-                                                {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="endDate">Fecha Fin</Label>
-                                                <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
-                                                {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
-                                            </div>
-                                            <DialogFooter>
-                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                {absences.map(abs => {
-                                        const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
-                                        let formattedStart = 'Invalid Date';
-                                        let formattedEnd = 'Invalid Date';
-                                        try {
-                                            formattedStart = format(parseISO(abs.startDate), 'dd/MM');
-                                            formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
-                                        } catch (e) {
-                                            console.error("Invalid date format in absence:", abs);
-                                        }
-                                        return (
-                                            <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                                <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
-                                                <div className="flex gap-1">
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
-                                                        <Edit className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            </li>
-                                        );
-                                })}
-                                    {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
-                                </ul>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Feriados</CardTitle>
-                                 <Dialog open={isHolidayDialogOpen} onOpenChange={(isOpen) => {
-                                        setIsHolidayDialogOpen(isOpen);
-                                        if (!isOpen) {
-                                            setEditingHoliday(null);
-                                            holidayForm.reset();
-                                        }
-                                    }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); setIsHolidayDialogOpen(true); }}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="sm:max-w-[425px]">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
-                                            <div>
-                                                <Label htmlFor="holidayDate">Fecha</Label>
-                                                <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
-                                                {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="holidayDescription">Descripción</Label>
-                                                <Input id="holidayDescription" {...holidayForm.register("description")} />
-                                                {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
-                                            </div>
-                                            <DialogFooter>
-                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                    {holidays.map(hol => {
-                                        let formattedDate = 'Invalid Date';
-                                        try {
-                                            formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
-                                        } catch (e) {
-                                            console.error("Invalid date format in holiday:", hol);
-                                        }
-                                        return (
-                                        <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                            <span>{formattedDate}: {hol.description}</span>
-                                            <div className="flex gap-1">
-                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </li>
-                                    )})}
-                                    {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
-                                </ul>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="mb-4 flex items-center space-x-2">
-                                <Checkbox
-                                    id="enableNightShift"
-                                    checked={isNightShiftEnabled}
-                                    onCheckedChange={(checked) => setIsNightShiftEnabled(Boolean(checked))}
-                                />
-                                <Label htmlFor="enableNightShift" className="text-sm font-medium">
-                                    Habilitar Turno Noche (N)
-                                </Label>
+                                                    <div>
+                                                        <Label htmlFor="holidayDescription">Descripción</Label>
+                                                        <Input id="holidayDescription" {...holidayForm.register("description")} />
+                                                        {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                            {holidays.map(hol => {
+                                                let formattedDate = 'Invalid Date';
+                                                try {
+                                                    formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
+                                                } catch (e) {
+                                                    console.error("Invalid date format in holiday:", hol);
+                                                }
+                                                return (
+                                                <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                    <span>{formattedDate}: {hol.description}</span>
+                                                    <div className="flex gap-1">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </li>
+                                            )})}
+                                            {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
+                                        </ul>
+                                    </CardContent>
+                                </Card>
                             </div>
-                            <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                <div>
-                                    <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
-                                    <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
-                                    <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                {isNightShiftEnabled && (
-                                    <div>
-                                        <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
-                                        <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
+                             <div className="flex justify-end mt-6">
+                                <Button onClick={() => setCurrentStep(2)} disabled={isLoading}>Siguiente</Button>
+                            </div>
+                        </>
+                    )}
+
+                    {currentStep === 2 && (
+                        <>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="mb-4 flex items-center space-x-2">
+                                        <Checkbox
+                                            id="enableNightShift"
+                                            checked={isNightShiftEnabled}
+                                            onCheckedChange={(checked) => setIsNightShiftEnabled(Boolean(checked))}
+                                        />
+                                        <Label htmlFor="enableNightShift" className="text-sm font-medium">
+                                            Habilitar Turno Noche (N)
+                                        </Label>
                                     </div>
-                                )}
-                                <div>
-                                    <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
-                                    <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
-                                    <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                {isNightShiftEnabled && (
-                                    <div>
-                                        <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
-                                        <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
+                                            <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
+                                            <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
+                                                <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
+                                            <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
+                                            <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
+                                                <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
                                     </div>
-                                )}
+                                </CardContent>
+                            </Card>
+                             <div className="flex justify-between mt-6">
+                                <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={isLoading}>Anterior</Button>
+                                <Button onClick={() => setCurrentStep(3)} disabled={isLoading}>Siguiente</Button>
                             </div>
-                        </CardContent>
-                    </Card>
+                        </>
+                    )}
 
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
-                                    <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
-                                    <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                <div>
-                                    <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
-                                    <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                 <div>
-                                    <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
-                                    <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
-                                    <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                 {isNightShiftEnabled && (
-                                    <div>
-                                        <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
-                                        <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
+                    {currentStep === 3 && (
+                        <>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
+                                            <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
+                                            <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
                                     </div>
-                                 )}
-                                <div>
-                                    <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT = M+T)</Label>
-                                    <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                            </div>
-                        </CardContent>
-                    </Card>
+                                </CardContent>
+                            </Card>
 
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
+                                            <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
+                                            <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
+                                            <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
+                                                <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT = M+T)</Label>
+                                            <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                            <div className="flex justify-between mt-6">
+                                <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={isLoading}>Anterior</Button>
+                                <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}>
+                                    {isLoading ? 'Generando...' : 'Generar Horario'}
+                                </Button>
+                            </div>
+                        </>
+                    )}
                 </CardContent>
             </Card>
         )}
@@ -1757,7 +1787,7 @@ export default function Home() {
                              <CardDescription>Puedes editar los turnos manualmente. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
                         </div>
                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config');}}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
+                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config'); setCurrentStep(1);}} disabled={isLoading}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
                              <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
                                 <Download className="mr-2 h-4 w-4" /> Exportar a CSV
@@ -1819,25 +1849,25 @@ export default function Home() {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          {isNightShiftEnabled && (
                             <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                                 {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                             </TableRow>
                          )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
@@ -1874,5 +1904,3 @@ export default function Home() {
     </div>
   );
 }
-
-    

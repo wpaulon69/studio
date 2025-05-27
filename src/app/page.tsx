@@ -622,7 +622,11 @@ export default function Home() {
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
                 const historyLine = lines[i];
-                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total") || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN)) break; 
+                if (!historyLine.trim() || 
+                    historyLine.toLowerCase().startsWith("total") || 
+                    historyLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || 
+                    historyLine.startsWith(HOLIDAYS_HEADER_TOKEN) || 
+                    historyLine.startsWith(ABSENCES_HEADER_TOKEN)) break; 
 
                 const historyCells = historyLine.split(','); 
                 const csvEmployeeName = historyCells[0]?.trim();

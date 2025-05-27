@@ -388,44 +388,40 @@ export default function Home() {
         }
 
 
-        const loadedEmployees: Employee[] = [];
+        let loadedEmployees: Employee[] = [];
         const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
         const previousDatesForHistory = getPreviousMonthDates();
 
         let employeesProcessedFromCsv = 0;
+        let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
+        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length;
 
-        for (let i = 1; i < lines.length; i++) {
+
+        for (let i = 1; i < scheduleSectionEndIndex; i++) {
           const lineContent = lines[i];
           const cells = lineContent.split(',');
           const employeeNameFromCSV = cells[employeeNameIndex]?.trim();
 
           if (!employeeNameFromCSV ||
-              employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total noche") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total personal") ||
               employeeNameFromCSV.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) ||
               employeeNameFromCSV.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) ||
               employeeNameFromCSV.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) ||
               employeeNameFromCSV.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())
               ) {
+            scheduleSectionEndIndex = i; // Mark end of employee data if a token is found
             break;
           }
 
           employeesProcessedFromCsv++;
 
-          let employeeInLoadedList = loadedEmployees.find(emp => emp.name.trim().toLowerCase() === employeeNameFromCSV.toLowerCase());
-
-          if (!employeeInLoadedList) {
-            employeeInLoadedList = {
-                id: Date.now() + loadedEmployees.length,
-                name: employeeNameFromCSV,
-                eligibleWeekend: true,
-                preferences: {},
-                history: {},
-            };
-            loadedEmployees.push(employeeInLoadedList);
-          }
+          const newEmployee: Employee = {
+              id: Date.now() + loadedEmployees.length,
+              name: employeeNameFromCSV,
+              eligibleWeekend: true,
+              preferences: {},
+              history: {},
+          };
+          loadedEmployees.push(newEmployee);
 
 
           if (previousDatesForHistory.length > 0) {
@@ -435,18 +431,18 @@ export default function Home() {
             const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
 
             if (relevantShiftsFromCSV.length > 0) {
-                if (!loadedHistoryInputs[employeeInLoadedList.id]) {
-                    loadedHistoryInputs[employeeInLoadedList.id] = {};
+                if (!loadedHistoryInputs[newEmployee.id]) {
+                    loadedHistoryInputs[newEmployee.id] = {};
                 }
                 previousDatesForHistory.forEach((dateStr, index) => {
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
-                        if (shiftValue === 'N' && !isNightShiftEnabled) { // If N shift is disabled in UI, ignore N from CSV history
-                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
+                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                            loadedHistoryInputs[newEmployee.id][dateStr] = null;
                         } else if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
-                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = shiftValue as ShiftType;
+                            loadedHistoryInputs[newEmployee.id][dateStr] = shiftValue as ShiftType;
                         } else if (shiftValue === '' || shiftValue === '-') {
-                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
+                            loadedHistoryInputs[newEmployee.id][dateStr] = null;
                         } else if (shiftValue) {
                             console.warn(`Turno inválido '${shiftValue}' para ${employeeNameFromCSV} en CSV. Se ignora para fecha ${dateStr}.`);
                         }
@@ -457,18 +453,121 @@ export default function Home() {
             }
           }
         }
+        
+        let employeeConfigLoaded = false;
+        const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
+        if (employeeConfigStartIndex !== -1) {
+            const configHeaderLine = lines[employeeConfigStartIndex];
+            const configHeaderParts = configHeaderLine.split(';');
+            const configDataHeaders = configHeaderParts.slice(1); 
+
+            const empNameIndexConfig = configDataHeaders.findIndex(h => h.trim() === 'Nombre');
+            const eligFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'ElegibleFindeDD');
+            const prefFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'PrefiereTrabajarFinde');
+            const turnoFijoIndex = configDataHeaders.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
+            const asignFijasIndex = configDataHeaders.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
+
+            const employeesWithUpdatedConfig = loadedEmployees.map(existingEmp => {
+                let employeeConfigDataRow: string | undefined;
+                for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
+                    const currentLineContent = lines[i];
+                     if (!currentLineContent.trim() ||
+                        currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) || // Stop if another section starts
+                        currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
+                       ) break;
+                    const dataCells = currentLineContent.split(';');
+                    const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
+                    if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
+                        employeeConfigDataRow = currentLineContent;
+                        break;
+                    }
+                }
+
+                if (employeeConfigDataRow) {
+                    const cells = employeeConfigDataRow.split(';');
+                    const updatedEmployee = {
+                        ...existingEmp,
+                        preferences: {
+                            ...(existingEmp.preferences || {}),
+                             fixedAssignments: [], 
+                        }
+                    };
+
+                    if (eligFindeIndex !== -1 && eligFindeIndex < cells.length && cells[eligFindeIndex]) {
+                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+                    }
+
+                    if (prefFindeIndex !== -1 && prefFindeIndex < cells.length && cells[prefFindeIndex]) {
+                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    } else {
+                        updatedEmployee.preferences.preferWeekendWork = false;
+                    }
+
+                    const jsonStringTurnoFijo = (turnoFijoIndex !== -1 && turnoFijoIndex < cells.length) ? cells[turnoFijoIndex]?.trim() : "";
+                    if (jsonStringTurnoFijo && jsonStringTurnoFijo.toLowerCase() !== 'null' && jsonStringTurnoFijo !== "") {
+                        try {
+                            const parsedFixedWorkShift = JSON.parse(jsonStringTurnoFijo);
+                            if (parsedFixedWorkShift && Array.isArray(parsedFixedWorkShift.dayOfWeek) && typeof parsedFixedWorkShift.shift === 'string') {
+                                updatedEmployee.preferences.fixedWorkShift = parsedFixedWorkShift;
+                            } else {
+                                 console.warn("Parsed TurnoFijoSemanal_JSON has invalid structure for", existingEmp.name, jsonStringTurnoFijo);
+                                 delete updatedEmployee.preferences.fixedWorkShift;
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, jsonStringTurnoFijo, e);
+                            delete updatedEmployee.preferences.fixedWorkShift;
+                        }
+                    } else {
+                        delete updatedEmployee.preferences.fixedWorkShift;
+                    }
+
+                    const jsonStringAsignaciones = (asignFijasIndex !== -1 && asignFijasIndex < cells.length) ? cells[asignFijasIndex]?.trim() : "";
+                     if (jsonStringAsignaciones && jsonStringAsignaciones.toLowerCase() !== 'null' && jsonStringAsignaciones !== "[]" && jsonStringAsignaciones !== "") {
+                        try {
+                            const parsedFixedAssignments = JSON.parse(jsonStringAsignaciones);
+                            if (Array.isArray(parsedFixedAssignments)) {
+                                updatedEmployee.preferences.fixedAssignments = parsedFixedAssignments;
+                            } else {
+                                console.warn("Parsed AsignacionesFijas_JSON is not an array for", existingEmp.name, jsonStringAsignaciones);
+                                updatedEmployee.preferences.fixedAssignments = [];
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, jsonStringAsignaciones, e);
+                            updatedEmployee.preferences.fixedAssignments = [];
+                        }
+                    } else {
+                         updatedEmployee.preferences.fixedAssignments = [];
+                    }
+                    return updatedEmployee;
+                }
+                return existingEmp;
+            });
+            loadedEmployees = employeesWithUpdatedConfig; // Replace with the updated list
+            employeeConfigLoaded = true;
+        }
+
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences([]);
+        setAbsences([]); // Clear previous absences as employee IDs might have changed
 
+        let toastMessage = "";
         if (loadedEmployees.length > 0) {
             const historyMessage = previousDatesForHistory.length > 0 ? `El historial de los últimos ${previousDatesForHistory.length} días también fue importado (si estaba disponible).` : "No se importó historial (mes/año no configurado para historial o CSV sin datos suficientes).";
-            toast({ title: "Importación Exitosa", description: `${loadedEmployees.length} empleado(s) cargado(s) desde el CSV. ${historyMessage}` });
+            const configMessage = employeeConfigLoaded ? "La configuración de empleados también fue cargada." : "No se encontró/cargó configuración de empleados desde el CSV.";
+            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s) desde el CSV. ${historyMessage} ${configMessage}`;
+            toast({ title: "Importación Exitosa", description: toastMessage });
         } else if (employeesProcessedFromCsv > 0) {
-             toast({ title: "Importación Parcial", description: `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`, variant: "default" });
+             toastMessage = `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`;
+             toast({ title: "Importación Parcial", description: toastMessage, variant: "default" });
         } else {
-            toast({ title: "Sin Empleados Cargados", description: "No se encontraron datos de empleados válidos en el archivo CSV para cargar.", variant: "default" });
+            toastMessage = "No se encontraron datos de empleados válidos en el archivo CSV para cargar.";
+            toast({ title: "Sin Empleados Cargados", description: toastMessage, variant: "default" });
         }
 
       } catch (error) {
@@ -605,7 +704,6 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
                     const dataCells = currentLineContent.split(';');
-                    // Ensure empNameIndexConfig is valid and dataCells is long enough
                     const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRow = currentLineContent;
@@ -619,7 +717,7 @@ export default function Home() {
                         ...existingEmp,
                         preferences: {
                             ...(existingEmp.preferences || {}),
-                             fixedAssignments: [], // Ensure it's always an array
+                             fixedAssignments: [], 
                         }
                     };
 
@@ -1849,25 +1947,25 @@ export default function Home() {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          {isNightShiftEnabled && (
                             <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                                 {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                             </TableRow>
                          )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
@@ -1904,3 +2002,4 @@ export default function Home() {
     </div>
   );
 }
+

@@ -106,10 +106,10 @@ export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800";
 export interface TargetStaffing {
   workdayMorning: number;
   workdayAfternoon: number;
-  workdayNight: number; // Added for Night shift
+  workdayNight: number;
   weekendHolidayMorning: number;
   weekendHolidayAfternoon: number;
-  weekendHolidayNight: number; // Added for Night shift
+  weekendHolidayNight: number;
 }
 
 export interface OperationalRules {
@@ -117,5 +117,5 @@ export interface OperationalRules {
   minCoverageTPT: number;
   minCoverageM: number;
   minCoverageT: number;
-  minCoverageN: number; // Added for Night shift
+  minCoverageN: number;
 }

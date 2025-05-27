@@ -588,9 +588,8 @@ export default function Home() {
             const turnoFijoIndex = configHeaderCells.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
             const asignFijasIndex = configHeaderCells.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
 
-            const employeesWithUpdatedConfig = currentEmployees.map(existingEmp => {
+            currentEmployees = currentEmployees.map(existingEmp => {
                 let employeeConfigDataRowCells: string[] | undefined;
-
                 for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
                     const currentLineContent = lines[i];
                      if (!currentLineContent.trim() || 
@@ -602,7 +601,7 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
-                    const cells = currentLineContent.split(';');
+                    const cells = currentLineContent.split(';'); // Corrected delimiter
                     const csvConfigEmpName = empNameIndexConfig !== -1 && cells[empNameIndexConfig] ? cells[empNameIndexConfig].trim() : '';
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRowCells = cells;
@@ -653,8 +652,6 @@ export default function Home() {
                 }
                 return existingEmp;
             });
-            
-            currentEmployees = employeesWithUpdatedConfig;
             employeeConfigLoaded = true;
         }
 
@@ -737,7 +734,7 @@ export default function Home() {
                 
                 const absenceCells = currentLine.split(';');
                 const csvEmpNameAbsence = empNameIndexAbsence !==-1 && absenceCells[empNameIndexAbsence] ? absenceCells[empNameIndexAbsence].trim() : '';
-                const type = absenceCells[empNameIndexAbsence + 1]?.trim(); // Assuming order: Name, Type, Start, End
+                const type = absenceCells[empNameIndexAbsence + 1]?.trim(); 
                 const startDate = absenceCells[empNameIndexAbsence + 2]?.trim();
                 const endDate = absenceCells[empNameIndexAbsence + 3]?.trim();
                 

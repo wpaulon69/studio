@@ -30,7 +30,11 @@ const defaultInitialEmployees: Employee[] = [
     // but will be overwritten by CSV import if that feature is used.
 ];
 
-const HISTORY_CSV_HEADER_TOKEN = "HISTORIAL_MES_ANTERIOR_EMPLEADO";
+const HISTORY_CSV_HEADER_TOKEN = "HISTORIAL_MES_ANTERIOR_EMPLEADO_V1"; // V1 for versioning
+const EMPLOYEE_CONFIG_HEADER_TOKEN = "CONFIGURACION_EMPLEADOS_V1";
+const HOLIDAYS_HEADER_TOKEN = "FERIADOS_V1";
+const ABSENCES_HEADER_TOKEN = "AUSENCIAS_V1";
+
 
 const defaultAbsences: Absence[] = [];
 const defaultHolidays: Holiday[] = [];
@@ -386,9 +390,12 @@ export default function Home() {
               employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
               employeeNameFromCSV.toLowerCase().startsWith("total noche") ||
               employeeNameFromCSV.toLowerCase().startsWith("total personal") ||
-              employeeNameFromCSV.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase())
+              employeeNameFromCSV.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())
               ) {
-            break; // Stop processing at summary rows or history section
+            break; // Stop processing at summary rows or other data sections
           }
 
           employeesProcessedFromCsv++;
@@ -498,7 +505,7 @@ export default function Home() {
         const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
 
         if (csvDayHeaders.length !== daysInSelectedMonth) {
-          throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
+          throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}). Asegúrese que el mes y año seleccionado coincidan con los del archivo.`);
         }
         
         const loadedEmployeesFromMainSchedule: Employee[] = [];
@@ -510,10 +517,14 @@ export default function Home() {
         for (let i = 1; i < scheduleSectionEndIndex; i++) {
             const cells = lines[i].split(',');
             const csvEmployeeName = cells[employeeNameColIndex]?.trim();
-            if (!csvEmployeeName) continue;
+            if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())) {
+                 scheduleSectionEndIndex = i; // Found start of a new section
+                 break;
+            }
+
 
             const newEmployee: Employee = {
-                id: Date.now() + loadedEmployeesFromMainSchedule.length,
+                id: Date.now() + loadedEmployeesFromMainSchedule.length, // Generate temporary ID
                 name: csvEmployeeName,
                 eligibleWeekend: true, 
                 preferences: {},
@@ -534,7 +545,42 @@ export default function Home() {
               }
             }
         }
-        setEmployees(loadedEmployeesFromMainSchedule);
+        let currentEmployees = [...loadedEmployeesFromMainSchedule]; // Start with employees from schedule
+
+        // --- Parse Employee Config Section ---
+        let employeeConfigLoaded = false;
+        const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
+        if (employeeConfigStartIndex !== -1) {
+            const configHeaderCells = lines[employeeConfigStartIndex].split(';');
+            const empIdIndex = configHeaderCells.findIndex(h => h === 'ID_Empleado');
+            const empNameIndex = configHeaderCells.findIndex(h => h === 'Nombre');
+            const eligFindeIndex = configHeaderCells.findIndex(h => h === 'ElegibleFindeDD');
+            const prefFindeIndex = configHeaderCells.findIndex(h => h === 'PrefiereTrabajarFinde');
+            const turnoFijoIndex = configHeaderCells.findIndex(h => h === 'TurnoFijoSemanal_JSON');
+            const asignFijasIndex = configHeaderCells.findIndex(h => h === 'AsignacionesFijas_JSON');
+
+            for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.trim() || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN) || line.startsWith(HISTORY_CSV_HEADER_TOKEN)) break;
+                const cells = line.split(';');
+                const csvEmpId = empIdIndex !== -1 ? parseInt(cells[empIdIndex]) : NaN;
+                const csvEmpName = empNameIndex !== -1 ? cells[empNameIndex] : '';
+
+                const employeeToUpdate = currentEmployees.find(emp => emp.id === csvEmpId || emp.name === csvEmpName);
+                if (employeeToUpdate) {
+                    if (eligFindeIndex !== -1) employeeToUpdate.eligibleWeekend = cells[eligFindeIndex]?.toLowerCase() === 'true';
+                    if (prefFindeIndex !== -1) employeeToUpdate.preferences.preferWeekendWork = cells[prefFindeIndex]?.toLowerCase() === 'true';
+                    if (turnoFijoIndex !== -1 && cells[turnoFijoIndex]) {
+                        try { employeeToUpdate.preferences.fixedWorkShift = JSON.parse(cells[turnoFijoIndex]); } catch (e) { console.warn("Error parsing TurnoFijoSemanal_JSON for", csvEmpName, e); }
+                    }
+                    if (asignFijasIndex !== -1 && cells[asignFijasIndex]) {
+                        try { employeeToUpdate.preferences.fixedAssignments = JSON.parse(cells[asignFijasIndex]); } catch (e) { console.warn("Error parsing AsignacionesFijas_JSON for", csvEmpName, e); }
+                    }
+                }
+            }
+            setEmployees([...currentEmployees]); // Update state with configured employees
+            employeeConfigLoaded = true;
+        }
 
 
         // --- Parse History Section (if exists) ---
@@ -549,11 +595,11 @@ export default function Home() {
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
                 const historyLine = lines[i];
-                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total")) break; // End of history data
+                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total") || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN)) break; // End of history data
 
                 const historyCells = historyLine.split(','); // Main schedule is comma, history data might be too
                 const csvEmployeeName = historyCells[0]?.trim();
-                const employeeInApp = loadedEmployeesFromMainSchedule.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
+                const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
                 if (employeeInApp) {
                     if (!newHistoryInputs[employeeInApp.id]) {
@@ -572,10 +618,55 @@ export default function Home() {
             setHistoryInputs(newHistoryInputs);
             historyLoaded = Object.keys(newHistoryInputs).length > 0;
         }
+        
+        // --- Parse Holidays Section ---
+        let holidaysLoaded = false;
+        const newHolidays: Holiday[] = [];
+        const holidaysStartIndex = lines.findIndex(line => line.startsWith(HOLIDAYS_HEADER_TOKEN));
+        if (holidaysStartIndex !== -1) {
+            for (let i = holidaysStartIndex + 1; i < lines.length; i++) {
+                const line = lines[i];
+                if (!line.trim() || line.startsWith(ABSENCES_HEADER_TOKEN) || line.startsWith(HISTORY_CSV_HEADER_TOKEN) || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN)) break;
+                const [date, ...descriptionParts] = line.split(';');
+                const description = descriptionParts.join(';'); // Re-join in case description had semicolons
+                if (date && description) {
+                    newHolidays.push({ id: Date.now() + newHolidays.length, date: date.trim(), description: description.trim() });
+                }
+            }
+            setHolidays(newHolidays);
+            holidaysLoaded = newHolidays.length > 0;
+        }
 
-        if (loadedEmployeesFromMainSchedule.length === 0) {
+        // --- Parse Absences Section ---
+        let absencesLoaded = false;
+        const newAbsences: Absence[] = [];
+        const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
+        if (absencesStartIndex !== -1) {
+            for (let i = absencesStartIndex + 1; i < lines.length; i++) {
+                const line = lines[i];
+                 if (!line.trim() || line.startsWith(HISTORY_CSV_HEADER_TOKEN) || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN)) break;
+                const [empIdStr, type, startDate, endDate] = line.split(';');
+                const empId = parseInt(empIdStr);
+                if (!isNaN(empId) && type && startDate && endDate && currentEmployees.find(e => e.id === empId)) {
+                    newAbsences.push({
+                        id: Date.now() + newAbsences.length,
+                        employeeId: empId,
+                        type: type.trim() as "LAO" | "LM",
+                        startDate: startDate.trim(),
+                        endDate: endDate.trim(),
+                    });
+                }
+            }
+            setAbsences(newAbsences);
+            absencesLoaded = newAbsences.length > 0;
+        }
+
+
+        if (currentEmployees.length === 0) {
           throw new Error("No se encontraron empleados válidos en la sección principal del horario del CSV.");
         }
+        setEmployees(currentEmployees); // Set the final list of employees
+
 
         const currentTargetStaffing: TargetStaffing = {
           workdayMorning: targetMWorkday,
@@ -593,19 +684,19 @@ export default function Home() {
             minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
         };
 
-        calculateFinalTotals(newSchedule, loadedEmployeesFromMainSchedule, absences, isNightShiftEnabled); // Use loaded employees
-        const newReport = validateSchedule(newSchedule, loadedEmployeesFromMainSchedule, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
+        calculateFinalTotals(newSchedule, currentEmployees, newAbsences, isNightShiftEnabled); // Use final loaded employees and absences
+        const newReport = validateSchedule(newSchedule, currentEmployees, newAbsences, newHolidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
 
         setSchedule(newSchedule);
         setReport(newReport);
         setDisplayMode('viewing');
-        let toastDescription = `Horario importado para ${loadedEmployeesFromMainSchedule.length} empleado(s).`;
-        if (historyLoaded) {
-            toastDescription += " El historial del mes anterior también fue cargado desde el archivo.";
-        } else {
-            toastDescription += " No se encontró sección de historial en el archivo, o no contenía datos.";
-        }
-        toast({ title: "Horario Cargado", description: toastDescription });
+        let toastMessages = [`Horario cargado para ${currentEmployees.length} empleado(s).`];
+        if (employeeConfigLoaded) toastMessages.push("Configuración de empleados cargada.");
+        if (historyLoaded) toastMessages.push("Historial del mes anterior cargado.");
+        if (holidaysLoaded) toastMessages.push(`${newHolidays.length} feriado(s) cargado(s).`);
+        if (absencesLoaded) toastMessages.push(`${newAbsences.length} ausencia(s) cargada(s).`);
+        
+        toast({ title: "Horario Cargado Completamente", description: toastMessages.join(' ') });
 
 
       } catch (error) {
@@ -767,10 +858,10 @@ export default function Home() {
     
     let userFileName = window.prompt("Ingrese el nombre para el archivo CSV:", defaultFileName);
 
-    if (userFileName === null) { // User pressed Cancel
+    if (userFileName === null) { 
         return;
     }
-    if (userFileName.trim() === "") { // User entered empty string or only whitespace
+    if (userFileName.trim() === "") { 
         userFileName = defaultFileName;
     }
     if (!userFileName.toLowerCase().endsWith(".csv")) {
@@ -779,6 +870,7 @@ export default function Home() {
 
     let csvContent = "data:text/csv;charset=utf-8,";
 
+    // Horario Principal
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
     const headerBase = ["Empleado", "Total D", "Total M", "Total T"];
     if (isNightShiftEnabled) headerBase.push("Total N");
@@ -793,30 +885,53 @@ export default function Home() {
         const employeeRow = [...employeeRowBase, ...dailyShiftsArray].join(","); 
         csvContent += employeeRow + "\r\n";
     });
-
     csvContent += "\r\n";
-
-    const emptyCellsForTotalRowPlaceholders = Array(headerBase.length - 1).fill("");
-
-
-    csvContent += ["Total Mañana (TM)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
-    csvContent += ["Total Tarde (TT)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    const totalPlaceholders = Array(headerBase.length - 1).fill("");
+    csvContent += ["Total Mañana (TM)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
     if (isNightShiftEnabled) {
-        csvContent += ["Total Noche (TN)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
+        csvContent += ["Total Noche (TN)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
     }
-    csvContent += ["TOTAL PERSONAL (TPT)", ...emptyCellsForTotalRowPlaceholders, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+    csvContent += ["TOTAL PERSONAL (TPT)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
-    // Add history section
+    // Sección de Configuración de Empleados
+    csvContent += "\r\n\r\n";
+    csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};ID_Empleado;Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
+    employees.forEach(emp => {
+        const fixedWorkShiftJson = emp.preferences.fixedWorkShift ? JSON.stringify(emp.preferences.fixedWorkShift) : "";
+        const fixedAssignmentsJson = emp.preferences.fixedAssignments ? JSON.stringify(emp.preferences.fixedAssignments) : "";
+        csvContent += `${emp.id};${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};${fixedWorkShiftJson};${fixedAssignmentsJson}\r\n`;
+    });
+    
+    // Sección de Historial
     const previousDatesForHistory = getPreviousMonthDates();
     if (previousDatesForHistory.length > 0 && Object.keys(historyInputs).length > 0) {
-        csvContent += "\r\n\r\n"; // Extra blank lines for separation
-        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'dd/MM/yyyy'))];
-        csvContent += historyHeaderCells.join(";") + "\r\n"; // Use semicolon for this distinct header for easier parsing
+        csvContent += "\r\n\r\n"; 
+        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'yyyy-MM-dd'))]; // Guardar con formato YYYY-MM-DD
+        csvContent += historyHeaderCells.join(";") + "\r\n"; 
 
         employees.forEach(emp => {
             const empHistory = historyInputs[emp.id] || {};
             const historyRowValues = previousDatesForHistory.map(dateStr => empHistory[dateStr] || "");
             csvContent += [emp.name, ...historyRowValues].join(",") + "\r\n";
+        });
+    }
+    
+    // Sección de Feriados
+    if (holidays.length > 0) {
+        csvContent += "\r\n\r\n";
+        csvContent += `${HOLIDAYS_HEADER_TOKEN};Fecha;Descripcion\r\n`;
+        holidays.forEach(hol => {
+            csvContent += `${hol.date};${hol.description}\r\n`;
+        });
+    }
+
+    // Sección de Ausencias
+    if (absences.length > 0) {
+        csvContent += "\r\n\r\n";
+        csvContent += `${ABSENCES_HEADER_TOKEN};ID_Empleado;Tipo;FechaInicio;FechaFin\r\n`;
+        absences.forEach(abs => {
+            csvContent += `${abs.employeeId};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
         });
     }
 
@@ -1557,5 +1672,6 @@ export default function Home() {
 
 
     
+
 
 

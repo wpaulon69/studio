@@ -93,11 +93,11 @@ export interface ScheduleReport {
 export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800",
   T: "bg-blue-100 text-blue-800",
-  N: "bg-indigo-100 text-indigo-800", // Color for Night shift
-  D: "bg-green-100 text-green-800",
+  N: "bg-indigo-100 text-indigo-800",
+  D: "bg-green-100 text-green-800", // D shifts with green background
   F: "bg-purple-100 text-purple-800",
-  LM: "bg-amber-100 text-amber-800",
-  LAO: "bg-amber-100 text-amber-800",
+  LM: "bg-amber-100 text-amber-800",  // LM shifts with soft orange (amber) background
+  LAO: "bg-amber-100 text-amber-800", // LAO shifts with soft orange (amber) background
   C: "bg-teal-100 text-teal-800",
 };
 

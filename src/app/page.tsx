@@ -372,11 +372,21 @@ export default function Home() {
         if (employeeNameIndex === -1) {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
-        const firstDayColumnIndex = isNightShiftEnabled ? 5 : 4; // After Empleado, Total D, Total M, Total T, [Total N if enabled]
+        
+        let detectedCsvFirstShiftColIndex: number;
+        const totalTIndex = header.findIndex(h => h.trim().toLowerCase() === 'total t');
+        if (totalTIndex === -1) throw new Error("Columna 'Total T' no encontrada en CSV para detectar estructura.");
+
+        if ((totalTIndex + 1) < header.length && header[totalTIndex + 1].trim().toLowerCase() === 'total n') {
+            detectedCsvFirstShiftColIndex = totalTIndex + 2;
+        } else {
+            detectedCsvFirstShiftColIndex = totalTIndex + 1;
+        }
+
 
         const loadedEmployees: Employee[] = [];
         const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
-        const previousDatesForHistory = getPreviousMonthDates(); // Relies on selectedMonth/Year
+        const previousDatesForHistory = getPreviousMonthDates(); 
 
         let employeesProcessedFromCsv = 0;
 
@@ -395,7 +405,7 @@ export default function Home() {
               employeeNameFromCSV.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) ||
               employeeNameFromCSV.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())
               ) {
-            break; // Stop processing at summary rows or other data sections
+            break; 
           }
 
           employeesProcessedFromCsv++;
@@ -404,20 +414,20 @@ export default function Home() {
 
           if (!employeeInLoadedList) {
             employeeInLoadedList = {
-                id: Date.now() + loadedEmployees.length, // Generate new ID
+                id: Date.now() + loadedEmployees.length, 
                 name: employeeNameFromCSV,
-                eligibleWeekend: true, // Default value
-                preferences: {},       // Default value
-                history: {},           // This will be populated by the history import logic
+                eligibleWeekend: true, 
+                preferences: {},       
+                history: {},           
             };
             loadedEmployees.push(employeeInLoadedList);
           }
 
-          // Populate history for this employee (newly created or found)
+          
           if (previousDatesForHistory.length > 0) {
-            const dailyShiftsFromCSV = cells.slice(firstDayColumnIndex);
+            const dailyShiftsFromCSV = cells.slice(detectedCsvFirstShiftColIndex);
             const numHistoryDaysToTake = previousDatesForHistory.length;
-            // Take the *last* N shifts from the CSV for history
+            
             const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
 
             if (relevantShiftsFromCSV.length > 0) {
@@ -427,7 +437,7 @@ export default function Home() {
                 previousDatesForHistory.forEach((dateStr, index) => {
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
-                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                        if (shiftValue === 'N' && !isNightShiftEnabled) { // If N shift is disabled in UI, ignore N from CSV history
                             loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
                         } else if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
                             loadedHistoryInputs[employeeInLoadedList.id][dateStr] = shiftValue as ShiftType;
@@ -446,7 +456,7 @@ export default function Home() {
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences([]); // Clear absences as employee list and IDs have changed
+        setAbsences([]); 
 
         if (loadedEmployees.length > 0) {
             const historyMessage = previousDatesForHistory.length > 0 ? `El historial de los últimos ${previousDatesForHistory.length} días también fue importado (si estaba disponible).` : "No se importó historial (mes/año no configurado para historial o CSV sin datos suficientes).";
@@ -495,36 +505,46 @@ export default function Home() {
         const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
         if (lines.length < 2) throw new Error("El CSV está vacío o no tiene suficientes filas.");
 
-        // --- Parse Main Schedule Section ---
         const headerCells = lines[0].split(',');
         const employeeNameColIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'empleado');
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
-        const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = isNightShiftEnabled ? 5 : 4; // After Empleado, Total D, Total M, Total T, [Total N if enabled]
-        const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
+        let detectedCsvFirstShiftColIndex: number;
+        let csvHasNightColumn = false;
+        const totalTIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'total t');
+        if (totalTIndex === -1) throw new Error("Columna 'Total T' no encontrada en el encabezado del CSV. Formato de archivo no reconocido.");
 
-        if (csvDayHeaders.length !== daysInSelectedMonth) {
-          throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}). Asegúrese que el mes y año seleccionado coincidan con los del archivo.`);
+        if ((totalTIndex + 1) < headerCells.length && headerCells[totalTIndex + 1].trim().toLowerCase() === 'total n') {
+            detectedCsvFirstShiftColIndex = totalTIndex + 2;
+            csvHasNightColumn = true;
+        } else {
+            detectedCsvFirstShiftColIndex = totalTIndex + 1;
+        }
+        
+        const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
+        const allPotentialDayHeadersInCsv = headerCells.slice(detectedCsvFirstShiftColIndex);
+
+        if (allPotentialDayHeadersInCsv.length < daysInSelectedMonth) {
+            throw new Error(`El número de columnas de días en el CSV (${allPotentialDayHeadersInCsv.length}) es menor que los días del mes seleccionado (${daysInSelectedMonth}). Asegúrese que el mes y año seleccionado coincidan con el contenido del archivo CSV.`);
         }
         
         const loadedEmployeesFromMainSchedule: Employee[] = [];
-        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled); // Initialize with empty employees first
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled); 
         
         let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
-        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length; // If no totals, parse all lines
+        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length; 
 
         for (let i = 1; i < scheduleSectionEndIndex; i++) {
             const cells = lines[i].split(',');
             const csvEmployeeName = cells[employeeNameColIndex]?.trim();
             if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())) {
-                 scheduleSectionEndIndex = i; // Found start of a new section
+                 scheduleSectionEndIndex = i; 
                  break;
             }
 
 
             const newEmployee: Employee = {
-                id: Date.now() + loadedEmployeesFromMainSchedule.length, // Generate temporary ID
+                id: Date.now() + loadedEmployeesFromMainSchedule.length, 
                 name: csvEmployeeName,
                 eligibleWeekend: true, 
                 preferences: {},
@@ -535,8 +555,15 @@ export default function Home() {
 
 
             for (let dayIdx = 0; dayIdx < daysInSelectedMonth; dayIdx++) {
-              const csvShift = cells[firstShiftColIndex + dayIdx]?.trim();
-              if (csvShift === 'N' && !isNightShiftEnabled) {
+              const csvShiftCellIndex = detectedCsvFirstShiftColIndex + dayIdx;
+              if (csvShiftCellIndex >= cells.length) {
+                  console.warn(`Fila de datos para empleado ${csvEmployeeName} es más corta de lo esperado. Faltan datos para el día ${dayIdx + 1}`);
+                  newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
+                  continue;
+              }
+              const csvShift = cells[csvShiftCellIndex]?.trim();
+              
+              if (csvShift === 'N' && !isNightShiftEnabled) { 
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
               } else if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = csvShift as ShiftType;
@@ -545,9 +572,9 @@ export default function Home() {
               }
             }
         }
-        let currentEmployees = [...loadedEmployeesFromMainSchedule]; // Start with employees from schedule
+        let currentEmployees = [...loadedEmployeesFromMainSchedule]; 
 
-        // --- Parse Employee Config Section ---
+        
         let employeeConfigLoaded = false;
         const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
         if (employeeConfigStartIndex !== -1) {
@@ -578,26 +605,26 @@ export default function Home() {
                     }
                 }
             }
-            setEmployees([...currentEmployees]); // Update state with configured employees
+            setEmployees([...currentEmployees]); 
             employeeConfigLoaded = true;
         }
 
 
-        // --- Parse History Section (if exists) ---
+        
         let historyLoaded = false;
         const newHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
         const historySectionStartIndex = lines.findIndex(line => line.startsWith(HISTORY_CSV_HEADER_TOKEN));
 
         if (historySectionStartIndex !== -1) {
             const historyHeaderLine = lines[historySectionStartIndex];
-            const historyHeaderCells = historyHeaderLine.split(';'); // Assuming semicolon separated for history header
-            const historyDateHeaders = historyHeaderCells.slice(1); // Skip token
+            const historyHeaderCells = historyHeaderLine.split(';'); 
+            const historyDateHeaders = historyHeaderCells.slice(1); 
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
                 const historyLine = lines[i];
-                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total") || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN)) break; // End of history data
+                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total") || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || line.startsWith(HOLIDAYS_HEADER_TOKEN) || line.startsWith(ABSENCES_HEADER_TOKEN)) break; 
 
-                const historyCells = historyLine.split(','); // Main schedule is comma, history data might be too
+                const historyCells = historyLine.split(','); 
                 const csvEmployeeName = historyCells[0]?.trim();
                 const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
@@ -606,8 +633,8 @@ export default function Home() {
                         newHistoryInputs[employeeInApp.id] = {};
                     }
                     historyDateHeaders.forEach((dateStr, index) => {
-                        const shiftValue = historyCells[index + 1]?.trim(); // +1 because first cell is name
-                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                        const shiftValue = historyCells[index + 1]?.trim(); 
+                        if (shiftValue === 'N' && !isNightShiftEnabled) { 
                              newHistoryInputs[employeeInApp.id][dateStr] = null;
                         } else if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
                             newHistoryInputs[employeeInApp.id][dateStr] = (shiftValue === '' || shiftValue === '-') ? null : shiftValue as ShiftType;
@@ -619,7 +646,7 @@ export default function Home() {
             historyLoaded = Object.keys(newHistoryInputs).length > 0;
         }
         
-        // --- Parse Holidays Section ---
+        
         let holidaysLoaded = false;
         const newHolidays: Holiday[] = [];
         const holidaysStartIndex = lines.findIndex(line => line.startsWith(HOLIDAYS_HEADER_TOKEN));
@@ -628,7 +655,7 @@ export default function Home() {
                 const line = lines[i];
                 if (!line.trim() || line.startsWith(ABSENCES_HEADER_TOKEN) || line.startsWith(HISTORY_CSV_HEADER_TOKEN) || line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN)) break;
                 const [date, ...descriptionParts] = line.split(';');
-                const description = descriptionParts.join(';'); // Re-join in case description had semicolons
+                const description = descriptionParts.join(';'); 
                 if (date && description) {
                     newHolidays.push({ id: Date.now() + newHolidays.length, date: date.trim(), description: description.trim() });
                 }
@@ -637,7 +664,7 @@ export default function Home() {
             holidaysLoaded = newHolidays.length > 0;
         }
 
-        // --- Parse Absences Section ---
+        
         let absencesLoaded = false;
         const newAbsences: Absence[] = [];
         const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
@@ -665,7 +692,7 @@ export default function Home() {
         if (currentEmployees.length === 0) {
           throw new Error("No se encontraron empleados válidos en la sección principal del horario del CSV.");
         }
-        setEmployees(currentEmployees); // Set the final list of employees
+        setEmployees(currentEmployees); 
 
 
         const currentTargetStaffing: TargetStaffing = {
@@ -684,7 +711,7 @@ export default function Home() {
             minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
         };
 
-        calculateFinalTotals(newSchedule, currentEmployees, newAbsences, isNightShiftEnabled); // Use final loaded employees and absences
+        calculateFinalTotals(newSchedule, currentEmployees, newAbsences, isNightShiftEnabled); 
         const newReport = validateSchedule(newSchedule, currentEmployees, newAbsences, newHolidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
 
         setSchedule(newSchedule);
@@ -726,7 +753,7 @@ export default function Home() {
     }
     if (employees.length === 0) {
         toast({ title: "Error de Configuración", description: "No hay empleados definidos. Por favor, agregue empleados o impórtelos desde un CSV.", variant: "destructive" });
-        setDisplayMode('config'); // Stay in config mode
+        setDisplayMode('config'); 
         return;
     }
     setIsLoading(true);
@@ -870,7 +897,7 @@ export default function Home() {
 
     let csvContent = "data:text/csv;charset=utf-8,";
 
-    // Horario Principal
+    
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
     const headerBase = ["Empleado", "Total D", "Total M", "Total T"];
     if (isNightShiftEnabled) headerBase.push("Total N");
@@ -894,7 +921,7 @@ export default function Home() {
     }
     csvContent += ["TOTAL PERSONAL (TPT)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
-    // Sección de Configuración de Empleados
+    
     csvContent += "\r\n\r\n";
     csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};ID_Empleado;Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
     employees.forEach(emp => {
@@ -903,11 +930,11 @@ export default function Home() {
         csvContent += `${emp.id};${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};${fixedWorkShiftJson};${fixedAssignmentsJson}\r\n`;
     });
     
-    // Sección de Historial
+    
     const previousDatesForHistory = getPreviousMonthDates();
     if (previousDatesForHistory.length > 0 && Object.keys(historyInputs).length > 0) {
         csvContent += "\r\n\r\n"; 
-        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'yyyy-MM-dd'))]; // Guardar con formato YYYY-MM-DD
+        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'yyyy-MM-dd'))]; 
         csvContent += historyHeaderCells.join(";") + "\r\n"; 
 
         employees.forEach(emp => {
@@ -917,7 +944,7 @@ export default function Home() {
         });
     }
     
-    // Sección de Feriados
+    
     if (holidays.length > 0) {
         csvContent += "\r\n\r\n";
         csvContent += `${HOLIDAYS_HEADER_TOKEN};Fecha;Descripcion\r\n`;
@@ -926,7 +953,7 @@ export default function Home() {
         });
     }
 
-    // Sección de Ausencias
+    
     if (absences.length > 0) {
         csvContent += "\r\n\r\n";
         csvContent += `${ABSENCES_HEADER_TOKEN};ID_Empleado;Tipo;FechaInicio;FechaFin\r\n`;
@@ -1669,9 +1696,3 @@ export default function Home() {
     </div>
   );
 }
-
-
-    
-
-
-

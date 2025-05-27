@@ -124,13 +124,16 @@ export default function Home() {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [isDateInitialized, setIsDateInitialized] = useState(false);
 
+  // Night Shift Toggle
+  const [isNightShiftEnabled, setIsNightShiftEnabled] = useState<boolean>(true);
+
   // Target Staffing State
   const [targetMWorkday, setTargetMWorkday] = useState<number>(3);
   const [targetTWorkday, setTargetTWorkday] = useState<number>(1);
-  const [targetNWorkday, setTargetNWorkday] = useState<number>(1); // Added for Night shift
+  const [targetNWorkday, setTargetNWorkday] = useState<number>(1);
   const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
   const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
-  const [targetNWeekendHoliday, setTargetNWeekendHoliday] = useState<number>(1); // Added for Night shift
+  const [targetNWeekendHoliday, setTargetNWeekendHoliday] = useState<number>(1);
   const { toast } = useToast();
 
   // Consecutive days rules state
@@ -142,7 +145,7 @@ export default function Home() {
   const [minCoverageTPT, setMinCoverageTPT] = useState<number>(2);
   const [minCoverageM, setMinCoverageM] = useState<number>(1);
   const [minCoverageT, setMinCoverageT] = useState<number>(1);
-  const [minCoverageN, setMinCoverageN] = useState<number>(1); // Added for Night shift
+  const [minCoverageN, setMinCoverageN] = useState<number>(1);
 
 
   useEffect(() => {
@@ -417,7 +420,9 @@ export default function Home() {
                 previousDatesForHistory.forEach((dateStr, index) => {
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
-                        if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
+                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
+                        } else if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
                             loadedHistoryInputs[employeeInLoadedList.id][dateStr] = shiftValue as ShiftType;
                         } else if (shiftValue === '' || shiftValue === '-') {
                             loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
@@ -489,7 +494,7 @@ export default function Home() {
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
         const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = 5; // After Empleado, Total D, Total M, Total T, Total N
+        const firstShiftColIndex = isNightShiftEnabled ? 5 : 4; // After Empleado, Total D, Total M, Total T, [Total N if enabled]
         const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
 
         if (csvDayHeaders.length !== daysInSelectedMonth) {
@@ -497,7 +502,7 @@ export default function Home() {
         }
         
         const loadedEmployeesFromMainSchedule: Employee[] = [];
-        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays); // Initialize with empty employees first
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled); // Initialize with empty employees first
         
         let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
         if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length; // If no totals, parse all lines
@@ -510,7 +515,7 @@ export default function Home() {
             const newEmployee: Employee = {
                 id: Date.now() + loadedEmployeesFromMainSchedule.length,
                 name: csvEmployeeName,
-                eligibleWeekend: true, // Default, can be overridden by history section if needed, or kept if history section missing
+                eligibleWeekend: true, 
                 preferences: {},
                 history: {}
             };
@@ -520,7 +525,9 @@ export default function Home() {
 
             for (let dayIdx = 0; dayIdx < daysInSelectedMonth; dayIdx++) {
               const csvShift = cells[firstShiftColIndex + dayIdx]?.trim();
-              if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
+              if (csvShift === 'N' && !isNightShiftEnabled) {
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
+              } else if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = csvShift as ShiftType;
               } else if (csvShift === '' || csvShift === '-') {
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
@@ -554,7 +561,9 @@ export default function Home() {
                     }
                     historyDateHeaders.forEach((dateStr, index) => {
                         const shiftValue = historyCells[index + 1]?.trim(); // +1 because first cell is name
-                        if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
+                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                             newHistoryInputs[employeeInApp.id][dateStr] = null;
+                        } else if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
                             newHistoryInputs[employeeInApp.id][dateStr] = (shiftValue === '' || shiftValue === '-') ? null : shiftValue as ShiftType;
                         }
                     });
@@ -571,21 +580,21 @@ export default function Home() {
         const currentTargetStaffing: TargetStaffing = {
           workdayMorning: targetMWorkday,
           workdayAfternoon: targetTWorkday,
-          workdayNight: targetNWorkday,
+          workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
           weekendHolidayMorning: targetMWeekendHoliday,
           weekendHolidayAfternoon: targetTWeekendHoliday,
-          weekendHolidayNight: targetNWeekendHoliday,
+          weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
         };
         const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
-            minCoverageN: minCoverageN,
+            minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
         };
 
-        calculateFinalTotals(newSchedule, loadedEmployeesFromMainSchedule, absences); // Use loaded employees
-        const newReport = validateSchedule(newSchedule, loadedEmployeesFromMainSchedule, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
+        calculateFinalTotals(newSchedule, loadedEmployeesFromMainSchedule, absences, isNightShiftEnabled); // Use loaded employees
+        const newReport = validateSchedule(newSchedule, loadedEmployeesFromMainSchedule, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
 
         setSchedule(newSchedule);
         setReport(newReport);
@@ -657,17 +666,17 @@ export default function Home() {
     const currentTargetStaffing: TargetStaffing = {
         workdayMorning: targetMWorkday,
         workdayAfternoon: targetTWorkday,
-        workdayNight: targetNWorkday,
+        workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
-        weekendHolidayNight: targetNWeekendHoliday,
+        weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
     };
     const currentOperationalRules: OperationalRules = {
         requiredDdWeekends: requiredDdWeekends,
         minCoverageTPT: minCoverageTPT,
         minCoverageM: minCoverageM,
         minCoverageT: minCoverageT,
-        minCoverageN: minCoverageN,
+        minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
     };
 
     setDisplayMode('viewing');
@@ -683,7 +692,8 @@ export default function Home() {
           currentTargetStaffing,
           maxConsecutiveWork,
           maxConsecutiveRest,
-          currentOperationalRules
+          currentOperationalRules,
+          isNightShiftEnabled
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -721,23 +731,23 @@ export default function Home() {
          const currentTargetStaffing: TargetStaffing = {
             workdayMorning: targetMWorkday,
             workdayAfternoon: targetTWorkday,
-            workdayNight: targetNWorkday,
+            workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
             weekendHolidayMorning: targetMWeekendHoliday,
             weekendHolidayAfternoon: targetTWeekendHoliday,
-            weekendHolidayNight: targetNWeekendHoliday,
+            weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
         };
          const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
-            minCoverageN: minCoverageN,
+            minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
         };
 
          setTimeout(() => {
              try {
-                calculateFinalTotals(scheduleToRecalculate, employees, absences);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
+                calculateFinalTotals(scheduleToRecalculate, employees, absences, isNightShiftEnabled);
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -758,22 +768,29 @@ export default function Home() {
     let csvContent = "data:text/csv;charset=utf-8,";
 
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
-    const headerRow = ["Empleado", "Total D", "Total M", "Total T", "Total N", ...dayNumbers].join(",");
+    const headerBase = ["Empleado", "Total D", "Total M", "Total T"];
+    if (isNightShiftEnabled) headerBase.push("Total N");
+    const headerRow = [...headerBase, ...dayNumbers].join(",");
     csvContent += headerRow + "\r\n";
 
     employees.forEach(emp => {
         const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, N: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
         const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
-        const employeeRow = [emp.name, totals.D, totals.M, totals.T, totals.N, shifts].join(",");
+        const employeeRowBase = [emp.name, totals.D, totals.M, totals.T];
+        if(isNightShiftEnabled) employeeRowBase.push(totals.N);
+        const employeeRow = [...employeeRowBase, shifts].join(",");
         csvContent += employeeRow + "\r\n";
     });
 
     csvContent += "\r\n";
 
-    csvContent += ["Total Mañana (TM)", "", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
-    csvContent += ["Total Tarde (TT)", "", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
-    csvContent += ["Total Noche (TN)", "", "", "", "", ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
-    csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+    const emptyTotalCells = isNightShiftEnabled ? ["", "", "", "", ""] : ["", "", "", ""];
+    csvContent += ["Total Mañana (TM)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    if (isNightShiftEnabled) {
+        csvContent += ["Total Noche (TN)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
+    }
+    csvContent += ["TOTAL PERSONAL (TPT)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
     // Add history section
     const previousDatesForHistory = getPreviousMonthDates();
@@ -838,8 +855,19 @@ export default function Home() {
         { value: 0, label: 'Domingo' }
     ];
 
-     const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
-     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N']));
+    const currentAllowedFixedShifts = useMemo(() => {
+        return isNightShiftEnabled ? ALLOWED_FIXED_ASSIGNMENT_SHIFTS : ALLOWED_FIXED_ASSIGNMENT_SHIFTS.filter(s => s !== 'N');
+    }, [isNightShiftEnabled]);
+
+    const currentWeeklyFixedShiftOptions = useMemo(() => {
+        const baseOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N']));
+        return isNightShiftEnabled ? baseOptions : baseOptions.filter(s => s !== 'N');
+    }, [isNightShiftEnabled]);
+
+     const manualShiftOptions = useMemo(() => {
+        const baseOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
+        return isNightShiftEnabled ? baseOptions : baseOptions.filter(opt => opt.value !== 'N');
+    }, [isNightShiftEnabled]);
 
 
   return (
@@ -974,7 +1002,7 @@ export default function Home() {
                                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                                                                     <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
                                                                     <SelectContent>
-                                                                        {ALLOWED_FIXED_ASSIGNMENT_SHIFTS.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                        {currentAllowedFixedShifts.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                                     </SelectContent>
                                                                 </Select>
                                                             )}
@@ -1008,7 +1036,7 @@ export default function Home() {
                                                                             const newDays = checked
                                                                                 ? [...currentDays, day.value]
                                                                                 : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? 'M';
+                                                                            const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); // Default if N disabled
                                                                             field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                         }}
                                                                     />
@@ -1024,7 +1052,7 @@ export default function Home() {
                                                         >
                                                             <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                             <SelectContent>
-                                                                {weeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                {currentWeeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
                                                             </SelectContent>
                                                         </Select>
                                                         <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
@@ -1092,7 +1120,7 @@ export default function Home() {
                                                               </SelectTrigger>
                                                               <SelectContent>
                                                                   <SelectItem value="-">- (Vacío)</SelectItem>
-                                                                  {SHIFT_TYPES.map(st => (
+                                                                  {SHIFT_TYPES.filter(st => isNightShiftEnabled || st !== 'N').map(st => (
                                                                       <SelectItem key={st} value={st}>{st}</SelectItem>
                                                                   ))}
                                                               </SelectContent>
@@ -1283,6 +1311,16 @@ export default function Home() {
                             <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
+                            <div className="mb-4 flex items-center space-x-2">
+                                <Checkbox
+                                    id="enableNightShift"
+                                    checked={isNightShiftEnabled}
+                                    onCheckedChange={(checked) => setIsNightShiftEnabled(Boolean(checked))}
+                                />
+                                <Label htmlFor="enableNightShift" className="text-sm font-medium">
+                                    Habilitar Turno Noche (N)
+                                </Label>
+                            </div>
                             <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                 <div>
                                     <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
@@ -1292,10 +1330,12 @@ export default function Home() {
                                     <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
                                     <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
-                                <div>
-                                    <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
-                                    <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
+                                {isNightShiftEnabled && (
+                                    <div>
+                                        <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
+                                        <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                    </div>
+                                )}
                                 <div>
                                     <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
                                     <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
@@ -1304,10 +1344,12 @@ export default function Home() {
                                     <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
                                     <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
-                                <div>
-                                    <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
-                                    <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
+                                {isNightShiftEnabled && (
+                                    <div>
+                                        <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
+                                        <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                    </div>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
@@ -1348,10 +1390,12 @@ export default function Home() {
                                     <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
                                     <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
                                 </div>
-                                 <div>
-                                    <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
-                                    <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
+                                 {isNightShiftEnabled && (
+                                    <div>
+                                        <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
+                                        <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
+                                    </div>
+                                 )}
                                 <div>
                                     <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT = M+T)</Label>
                                     <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
@@ -1450,11 +1494,13 @@ export default function Home() {
                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
-                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
-                            {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
-                        </TableRow>
+                         {isNightShiftEnabled && (
+                            <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
+                            </TableRow>
+                         )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
                             <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
                              <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
@@ -1494,5 +1540,3 @@ export default function Home() {
     </div>
   );
 }
-
-

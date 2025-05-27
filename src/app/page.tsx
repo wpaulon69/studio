@@ -30,6 +30,7 @@ const defaultInitialEmployees: Employee[] = [
     // but will be overwritten by CSV import if that feature is used.
 ];
 
+const HISTORY_CSV_HEADER_TOKEN = "HISTORIAL_MES_ANTERIOR_EMPLEADO";
 
 const defaultAbsences: Absence[] = [];
 const defaultHolidays: Holiday[] = [];
@@ -381,8 +382,10 @@ export default function Home() {
               employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
               employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
               employeeNameFromCSV.toLowerCase().startsWith("total noche") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total personal")) {
-            break; // Stop processing at summary rows
+              employeeNameFromCSV.toLowerCase().startsWith("total personal") ||
+              employeeNameFromCSV.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase())
+              ) {
+            break; // Stop processing at summary rows or history section
           }
 
           employeesProcessedFromCsv++;
@@ -480,6 +483,7 @@ export default function Home() {
         const lines = text.split(/\r\n|\n/).filter(line => line.trim() !== '');
         if (lines.length < 2) throw new Error("El CSV está vacío o no tiene suficientes filas.");
 
+        // --- Parse Main Schedule Section ---
         const headerCells = lines[0].split(',');
         const employeeNameColIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'empleado');
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
@@ -491,36 +495,77 @@ export default function Home() {
         if (csvDayHeaders.length !== daysInSelectedMonth) {
           throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
         }
+        
+        const loadedEmployeesFromMainSchedule: Employee[] = [];
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays); // Initialize with empty employees first
+        
+        let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
+        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length; // If no totals, parse all lines
 
-        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, employees, holidays);
-        let employeesMatched = 0;
-        let employeesNotFoundInApp: string[] = [];
+        for (let i = 1; i < scheduleSectionEndIndex; i++) {
+            const cells = lines[i].split(',');
+            const csvEmployeeName = cells[employeeNameColIndex]?.trim();
+            if (!csvEmployeeName) continue;
 
-        for (let i = 1; i < lines.length; i++) {
-          const cells = lines[i].split(',');
-          const csvEmployeeName = cells[employeeNameColIndex]?.trim();
-          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break;
+            const newEmployee: Employee = {
+                id: Date.now() + loadedEmployeesFromMainSchedule.length,
+                name: csvEmployeeName,
+                eligibleWeekend: true, // Default, can be overridden by history section if needed, or kept if history section missing
+                preferences: {},
+                history: {}
+            };
+            loadedEmployeesFromMainSchedule.push(newEmployee);
+            newSchedule.employeeTotals[newEmployee.id] = { M: 0, T: 0, N: 0, D: 0, F: 0, LM: 0, LAO: 0, C: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
 
-          const appEmployee = employees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
-          if (appEmployee) {
-            employeesMatched++;
+
             for (let dayIdx = 0; dayIdx < daysInSelectedMonth; dayIdx++) {
               const csvShift = cells[firstShiftColIndex + dayIdx]?.trim();
               if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
-                newSchedule.days[dayIdx].shifts[appEmployee.id] = csvShift as ShiftType;
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = csvShift as ShiftType;
               } else if (csvShift === '' || csvShift === '-') {
-                newSchedule.days[dayIdx].shifts[appEmployee.id] = null;
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
               }
             }
-          } else {
-            if(!employeesNotFoundInApp.includes(csvEmployeeName)) employeesNotFoundInApp.push(csvEmployeeName);
-          }
+        }
+        setEmployees(loadedEmployeesFromMainSchedule);
+
+
+        // --- Parse History Section (if exists) ---
+        let historyLoaded = false;
+        const newHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
+        const historySectionStartIndex = lines.findIndex(line => line.startsWith(HISTORY_CSV_HEADER_TOKEN));
+
+        if (historySectionStartIndex !== -1) {
+            const historyHeaderLine = lines[historySectionStartIndex];
+            const historyHeaderCells = historyHeaderLine.split(';'); // Assuming semicolon separated for history header
+            const historyDateHeaders = historyHeaderCells.slice(1); // Skip token
+
+            for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
+                const historyLine = lines[i];
+                if (!historyLine.trim() || historyLine.toLowerCase().startsWith("total")) break; // End of history data
+
+                const historyCells = historyLine.split(','); // Main schedule is comma, history data might be too
+                const csvEmployeeName = historyCells[0]?.trim();
+                const employeeInApp = loadedEmployeesFromMainSchedule.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
+
+                if (employeeInApp) {
+                    if (!newHistoryInputs[employeeInApp.id]) {
+                        newHistoryInputs[employeeInApp.id] = {};
+                    }
+                    historyDateHeaders.forEach((dateStr, index) => {
+                        const shiftValue = historyCells[index + 1]?.trim(); // +1 because first cell is name
+                        if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
+                            newHistoryInputs[employeeInApp.id][dateStr] = (shiftValue === '' || shiftValue === '-') ? null : shiftValue as ShiftType;
+                        }
+                    });
+                }
+            }
+            setHistoryInputs(newHistoryInputs);
+            historyLoaded = Object.keys(newHistoryInputs).length > 0;
         }
 
-        if (employeesMatched === 0 && employees.length > 0) { 
-          throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados. Asegúrese de que los nombres coincidan o importe la lista de empleados primero si es necesario.");
-        } else if (employeesMatched === 0 && employees.length === 0) {
-          throw new Error("No hay empleados en la aplicación. Importe una lista de empleados antes de cargar un horario completo.");
+        if (loadedEmployeesFromMainSchedule.length === 0) {
+          throw new Error("No se encontraron empleados válidos en la sección principal del horario del CSV.");
         }
 
         const currentTargetStaffing: TargetStaffing = {
@@ -539,13 +584,20 @@ export default function Home() {
             minCoverageN: minCoverageN,
         };
 
-        calculateFinalTotals(newSchedule, employees, absences);
-        const newReport = validateSchedule(newSchedule, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
+        calculateFinalTotals(newSchedule, loadedEmployeesFromMainSchedule, absences); // Use loaded employees
+        const newReport = validateSchedule(newSchedule, loadedEmployeesFromMainSchedule, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
 
         setSchedule(newSchedule);
         setReport(newReport);
         setDisplayMode('viewing');
-        toast({ title: "Horario Cargado", description: `Horario importado para ${employeesMatched} empleado(s). ${employeesNotFoundInApp.length > 0 ? `No se encontraron en la app: ${employeesNotFoundInApp.slice(0,3).join(', ')}${employeesNotFoundInApp.length > 3 ? '...' : ''}` : ''}` });
+        let toastDescription = `Horario importado para ${loadedEmployeesFromMainSchedule.length} empleado(s).`;
+        if (historyLoaded) {
+            toastDescription += " El historial del mes anterior también fue cargado desde el archivo.";
+        } else {
+            toastDescription += " No se encontró sección de historial en el archivo, o no contenía datos.";
+        }
+        toast({ title: "Horario Cargado", description: toastDescription });
+
 
       } catch (error) {
         console.error("Error importando horario completo desde CSV:", error);
@@ -723,6 +775,20 @@ export default function Home() {
     csvContent += ["Total Noche (TN)", "", "", "", "", ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
     csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
+    // Add history section
+    const previousDatesForHistory = getPreviousMonthDates();
+    if (previousDatesForHistory.length > 0 && Object.keys(historyInputs).length > 0) {
+        csvContent += "\r\n\r\n"; // Extra blank lines for separation
+        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'dd/MM/yyyy'))];
+        csvContent += historyHeaderCells.join(";") + "\r\n"; // Use semicolon for this distinct header for easier parsing
+
+        employees.forEach(emp => {
+            const empHistory = historyInputs[emp.id] || {};
+            const historyRowValues = previousDatesForHistory.map(dateStr => empHistory[dateStr] || "");
+            csvContent += [emp.name, ...historyRowValues].join(",") + "\r\n";
+        });
+    }
+
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
@@ -750,7 +816,7 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (shift === null) return "bg-destructive text-destructive-foreground"; 
+    if (shift === null) return "bg-destructive text-destructive-foreground";
     return SHIFT_COLORS[shift] || "bg-background";
   };
 
@@ -1428,3 +1494,5 @@ export default function Home() {
     </div>
   );
 }
+
+

@@ -1326,12 +1326,48 @@ export default function Home() {
    }
 
    const getValidationIcon = (passed: boolean, rule: string) => {
-       if (passed) return <CheckCircle className="text-green-600 h-5 w-5" />;
-       if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial") || rule.startsWith("Generator Info") || rule.startsWith("Prioridad 2 Info")) {
-            return <Info className="text-yellow-600 h-5 w-5" />;
-       }
-       return <XCircle className="text-red-600 h-5 w-5" />;
-   };
+    // Fallos Críticos (P1, P2 Cobertura, P5 Consecutividad/Post-Noche, Completitud)
+    if (!passed && (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud"))) {
+        return <XCircle className="text-red-600 h-5 w-5" />;
+    }
+    // Advertencias (P3 Descansos, P4 Finde, Ranura Vacía Persistente, T->M, Compensatorio)
+    if (!passed && (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio"))) {
+        return <AlertTriangle className="text-yellow-500 h-5 w-5" />;
+    }
+    // Información (Flexibles no cumplidos, Preferencias, Info Generador)
+    if (!passed && (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial"))) {
+        return <Info className="text-blue-500 h-5 w-5" />;
+    }
+    // Éxito
+    if (passed) {
+        return <CheckCircle className="text-green-600 h-5 w-5" />;
+    }
+    // Por defecto (si algo no encaja, o reglas de solo info que siempre pasan)
+    return <Info className="text-gray-500 h-5 w-5" />;
+};
+
+const getAlertVariant = (passed: boolean, rule: string): "default" | "destructive" => {
+    if (!passed && (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima")|| rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud"))) {
+        return "destructive";
+    }
+    return "default";
+};
+
+const getAlertCustomClasses = (passed: boolean, rule: string): string => {
+    if (passed) return "bg-green-50 border-green-300";
+    if (!passed) {
+        if (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud")) {
+             return "bg-red-50 border-red-300"; // Destructive already handles some of this, but good for consistency
+        }
+        if (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio")) {
+            return "bg-yellow-50 border-yellow-300";
+        }
+        if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial")) {
+            return "bg-blue-50 border-blue-300";
+        }
+    }
+    return "bg-gray-50 border-gray-300";
+};
 
     const daysOfWeekOptions = [
         { value: 1, label: 'Lunes' }, { value: 2, label: 'Martes' }, { value: 3, label: 'Miércoles' },
@@ -1581,7 +1617,7 @@ export default function Home() {
                                             {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
                                         </ul>
                                         <div className="mt-4 space-y-4 border-t pt-4">
-                                            <h4 className="text-md font-semibold">Importar Lista de Empleados, Historial, Configuración y Reglas</h4>
+                                            <h4 className="text-md font-semibold">Importar Empleados, Historial, Config. y Reglas</h4>
                                             <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
                                                 <Upload className="mr-2 h-4 w-4" /> Importar Empleados, Historial, Config. y Reglas CSV
                                             </Button>
@@ -2034,7 +2070,7 @@ export default function Home() {
                 <CardContent>
                     <div className="space-y-3">
                     {report.map((item, index) => (
-                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? "border-yellow-300" : "border-red-200") )}>
+                         <Alert key={index} variant={getAlertVariant(item.passed, item.rule)} className={cn(getAlertCustomClasses(item.passed, item.rule))}>
                             <div className="flex items-start space-x-3">
                             {getValidationIcon(item.passed, item.rule)}
                             <div>
@@ -2053,4 +2089,3 @@ export default function Home() {
     </div>
   );
 }
-

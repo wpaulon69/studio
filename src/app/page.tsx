@@ -581,14 +581,15 @@ export default function Home() {
         let employeeConfigLoaded = false;
         const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
         if (employeeConfigStartIndex !== -1) {
-            const configHeaderCells = lines[employeeConfigStartIndex].split(';');
+            const configHeaderLine = lines[employeeConfigStartIndex];
+            const configHeaderCells = configHeaderLine.split(';');
             const empNameIndexConfig = configHeaderCells.findIndex(h => h.trim() === 'Nombre');
             const eligFindeIndex = configHeaderCells.findIndex(h => h.trim() === 'ElegibleFindeDD');
             const prefFindeIndex = configHeaderCells.findIndex(h => h.trim() === 'PrefiereTrabajarFinde');
             const turnoFijoIndex = configHeaderCells.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
             const asignFijasIndex = configHeaderCells.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
 
-            currentEmployees = currentEmployees.map(existingEmp => {
+            const employeesWithUpdatedConfig = currentEmployees.map(existingEmp => {
                 let employeeConfigDataRowCells: string[] | undefined;
                 for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
                     const currentLineContent = lines[i];
@@ -601,8 +602,9 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
-                    const cells = currentLineContent.split(';'); // Corrected delimiter
-                    const csvConfigEmpName = empNameIndexConfig !== -1 && cells[empNameIndexConfig] ? cells[empNameIndexConfig].trim() : '';
+                    const cells = currentLineContent.split(';'); 
+                    const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < cells.length) ? cells[empNameIndexConfig]?.trim() : '';
+
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRowCells = cells;
                         break;
@@ -615,34 +617,58 @@ export default function Home() {
                         ...existingEmp, 
                         preferences: { 
                             ...(existingEmp.preferences || {}),
-                            fixedAssignments: [], 
                         }
                     };
+                     // Ensure preferences object exists
+                    if (!updatedEmployee.preferences) {
+                        updatedEmployee.preferences = {};
+                    }
+                    // Default fixedAssignments to empty array if not yet present on the fresh copy
+                    if (updatedEmployee.preferences.fixedAssignments === undefined) {
+                        updatedEmployee.preferences.fixedAssignments = [];
+                    }
 
-                    if (eligFindeIndex !== -1 && cells[eligFindeIndex]) {
-                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+
+                    if (eligFindeIndex !== -1 && (eligFindeIndex-1) < cells.length && cells[eligFindeIndex-1]) {
+                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex-1].trim().toLowerCase() === 'true';
                     }
                     
-                    if (prefFindeIndex !== -1 && cells[prefFindeIndex]) {
-                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    if (prefFindeIndex !== -1 && (prefFindeIndex-1) < cells.length && cells[prefFindeIndex-1]) {
+                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex-1].trim().toLowerCase() === 'true';
+                    } else {
+                        updatedEmployee.preferences.preferWeekendWork = false; // Default if not present
                     }
                     
-                    if (turnoFijoIndex !== -1 && cells[turnoFijoIndex] && cells[turnoFijoIndex].trim()) {
+                    const jsonStringTurnoFijo = (turnoFijoIndex !== -1 && (turnoFijoIndex-1) < cells.length) ? cells[turnoFijoIndex-1]?.trim() : "";
+                    if (jsonStringTurnoFijo && jsonStringTurnoFijo.toLowerCase() !== 'null' && jsonStringTurnoFijo !== '""') {
                         try { 
-                            updatedEmployee.preferences.fixedWorkShift = JSON.parse(cells[turnoFijoIndex].trim()); 
+                            const parsedFixedWorkShift = JSON.parse(jsonStringTurnoFijo); 
+                            if (parsedFixedWorkShift && Array.isArray(parsedFixedWorkShift.dayOfWeek) && typeof parsedFixedWorkShift.shift === 'string') {
+                                updatedEmployee.preferences.fixedWorkShift = parsedFixedWorkShift; 
+                            } else {
+                                 console.warn("Parsed TurnoFijoSemanal_JSON has invalid structure for", existingEmp.name, jsonStringTurnoFijo);
+                                 delete updatedEmployee.preferences.fixedWorkShift;
+                            }
                         } catch (e) { 
-                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, e); 
+                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, jsonStringTurnoFijo, e); 
                             delete updatedEmployee.preferences.fixedWorkShift;
                         }
                     } else {
                         delete updatedEmployee.preferences.fixedWorkShift;
                     }
 
-                    if (asignFijasIndex !== -1 && cells[asignFijasIndex] && cells[asignFijasIndex].trim()) {
+                    const jsonStringAsignaciones = (asignFijasIndex !== -1 && (asignFijasIndex-1) < cells.length) ? cells[asignFijasIndex-1]?.trim() : "";
+                    if (jsonStringAsignaciones && jsonStringAsignaciones.toLowerCase() !== 'null' && jsonStringAsignaciones !== '""') {
                         try { 
-                            updatedEmployee.preferences.fixedAssignments = JSON.parse(cells[asignFijasIndex].trim()); 
+                            const parsedFixedAssignments = JSON.parse(jsonStringAsignaciones);
+                            if (Array.isArray(parsedFixedAssignments)) {
+                                updatedEmployee.preferences.fixedAssignments = parsedFixedAssignments; 
+                            } else {
+                                console.warn("Parsed AsignacionesFijas_JSON is not an array for", existingEmp.name, jsonStringAsignaciones);
+                                updatedEmployee.preferences.fixedAssignments = [];
+                            }
                         } catch (e) { 
-                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, e); 
+                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, jsonStringAsignaciones, e); 
                             updatedEmployee.preferences.fixedAssignments = []; 
                         }
                     } else {
@@ -652,6 +678,7 @@ export default function Home() {
                 }
                 return existingEmp;
             });
+            currentEmployees = employeesWithUpdatedConfig;
             employeeConfigLoaded = true;
         }
 
@@ -733,10 +760,10 @@ export default function Home() {
                  if (!currentLine.trim() || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
                 
                 const absenceCells = currentLine.split(';');
-                const csvEmpNameAbsence = empNameIndexAbsence !==-1 && absenceCells[empNameIndexAbsence] ? absenceCells[empNameIndexAbsence].trim() : '';
-                const type = absenceCells[empNameIndexAbsence + 1]?.trim(); 
-                const startDate = absenceCells[empNameIndexAbsence + 2]?.trim();
-                const endDate = absenceCells[empNameIndexAbsence + 3]?.trim();
+                const csvEmpNameAbsence = (empNameIndexAbsence !== -1 && (empNameIndexAbsence -1) < absenceCells.length) ? absenceCells[empNameIndexAbsence -1]?.trim() : '';
+                const type = (empNameIndexAbsence !== -1 && empNameIndexAbsence < absenceCells.length) ? absenceCells[empNameIndexAbsence]?.trim() : ''; 
+                const startDate = (empNameIndexAbsence !== -1 && (empNameIndexAbsence + 1) < absenceCells.length) ? absenceCells[empNameIndexAbsence + 1]?.trim() : '';
+                const endDate = (empNameIndexAbsence !== -1 && (empNameIndexAbsence + 2) < absenceCells.length) ? absenceCells[empNameIndexAbsence + 2]?.trim() : '';
                 
                 const employeeForAbsence = currentEmployees.find(e => e.name.toLowerCase() === csvEmpNameAbsence.toLowerCase());
 
@@ -1052,11 +1079,12 @@ export default function Home() {
 
     
     csvContent += "\r\n\r\n";
-    csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};ID_Empleado;Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
+    csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
     employees.forEach(emp => {
         const fixedWorkShiftJson = emp.preferences.fixedWorkShift ? JSON.stringify(emp.preferences.fixedWorkShift) : "";
         const fixedAssignmentsJson = emp.preferences.fixedAssignments ? JSON.stringify(emp.preferences.fixedAssignments) : "";
-        csvContent += `${emp.id};${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};"${fixedWorkShiftJson.replace(/"/g, '""')}";"${fixedAssignmentsJson.replace(/"/g, '""')}"\r\n`;
+        // No ID needed here if matching by name on import. If ID becomes primary, add emp.id as first field.
+        csvContent += `${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};"${fixedWorkShiftJson.replace(/"/g, '""')}";"${fixedAssignmentsJson.replace(/"/g, '""')}"\r\n`;
     });
     
     
@@ -1087,7 +1115,7 @@ export default function Home() {
         csvContent += "\r\n\r\n";
         csvContent += `${ABSENCES_HEADER_TOKEN};NombreEmpleado;Tipo;FechaInicio;FechaFin\r\n`;
         absences.forEach(abs => {
-            const empName = employees.find(e => e.id === abs.employeeId)?.name || `ID_${abs.employeeId}`;
+            const empName = employees.find(e => e.id === abs.employeeId)?.name || `ID_EMPLEADO_DESCONOCIDO_${abs.employeeId}`;
             csvContent += `${empName};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
         });
     }

@@ -368,7 +368,7 @@ export default function Home() {
         if (employeeNameIndex === -1) {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
-        const firstDayColumnIndex = 5; // Shifts start after "Empleado", "Total D", "Total M", "Total T", "Total N"
+        const firstDayColumnIndex = isNightShiftEnabled ? 5 : 4; // After Empleado, Total D, Total M, Total T, [Total N if enabled]
 
         const loadedEmployees: Employee[] = [];
         const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
@@ -775,16 +775,23 @@ export default function Home() {
 
     employees.forEach(emp => {
         const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, N: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
-        const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
+        const dailyShiftsArray = schedule.days.map(day => day.shifts[emp.id] || ""); // Array of shifts
         const employeeRowBase = [emp.name, totals.D, totals.M, totals.T];
         if(isNightShiftEnabled) employeeRowBase.push(totals.N);
-        const employeeRow = [...employeeRowBase, shifts].join(",");
+        const employeeRow = [...employeeRowBase, ...dailyShiftsArray].join(","); // Spread dailyShiftsArray
         csvContent += employeeRow + "\r\n";
     });
 
     csvContent += "\r\n";
 
-    const emptyTotalCells = isNightShiftEnabled ? ["", "", "", "", ""] : ["", "", "", ""];
+    const emptyTotalCellsBaseCount = 1 // For "Empleado" column
+                                + 1 // For "Total D"
+                                + 1 // For "Total M"
+                                + 1; // For "Total T"
+    const emptyTotalCellsCount = isNightShiftEnabled ? emptyTotalCellsBaseCount + 1 : emptyTotalCellsBaseCount;
+    const emptyTotalCells = Array(emptyTotalCellsCount).fill("");
+
+
     csvContent += ["Total Mañana (TM)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
     csvContent += ["Total Tarde (TT)", ...emptyTotalCells, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
     if (isNightShiftEnabled) {
@@ -1436,7 +1443,7 @@ export default function Home() {
                     <TableHeader>
                         <TableRow className="bg-secondary">
                         <TableHead className="sticky left-0 bg-secondary z-30 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
-                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]")}>D</TableHead>
+                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
 
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead
@@ -1457,7 +1464,7 @@ export default function Home() {
                         {employees.map(emp => (
                         <TableRow key={emp.id}>
                             <TableCell className="sticky left-0 bg-background z-30 border p-1 font-medium text-sm whitespace-nowrap min-w-[170px] w-[170px]">{emp.name}</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]")}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
 
                             {schedule.days.map(day => {
                             const currentShift = day.shifts[emp.id];
@@ -1540,3 +1547,6 @@ export default function Home() {
     </div>
   );
 }
+
+
+    

@@ -103,7 +103,7 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[], isNigh
         if (prefs.fixedAssignments) {
             prefs.fixedAssignments.forEach(assignment => {
                  if (!assignment.date || !assignment.shift) return;
-                 if (assignment.shift === 'N' && !isNightShiftEnabled) return; 
+                 if (assignment.shift === 'N' && !isNightShiftEnabled) return;
 
                  try {
                     if (!isValid(parseISO(assignment.date))) return;
@@ -119,13 +119,13 @@ function applyFixedAssignments(schedule: Schedule, employees: Employee[], isNigh
 
          if (prefs.fixedWorkShift) {
             const { dayOfWeek: daysOfWeek, shift } = prefs.fixedWorkShift;
-            if (shift === 'N' && !isNightShiftEnabled) return; 
+            if (shift === 'N' && !isNightShiftEnabled) return;
 
             if(Array.isArray(daysOfWeek) && shift) {
                 schedule.days.forEach(day => {
-                     if (day.shifts[employee.id] === null) { 
+                     if (day.shifts[employee.id] === null) {
                          const currentDate = parseISO(day.date);
-                         const currentDayOfWeek = getDay(currentDate); 
+                         const currentDayOfWeek = getDay(currentDate);
                          if (daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday) {
                              day.shifts[employee.id] = shift;
                          }
@@ -158,7 +158,7 @@ function getConsecutiveDaysOfTypeBefore(
     }
 
     const scheduleStartDateString = schedule.days[0]?.date;
-    if (!scheduleStartDateString) return 0; 
+    if (!scheduleStartDateString) return 0;
     const scheduleStartDate = parseISO(scheduleStartDateString);
 
 
@@ -170,7 +170,7 @@ function getConsecutiveDaysOfTypeBefore(
         return targetTypes.includes(shift);
     };
 
-    
+
     while (isValid(currentDate) && currentDate >= scheduleStartDate) {
         const currentDayStr = format(currentDate, 'yyyy-MM-dd');
         const daySchedule = schedule.days.find(d => d.date === currentDayStr);
@@ -179,17 +179,17 @@ function getConsecutiveDaysOfTypeBefore(
         if (isTargetType(shift)) {
             consecutiveDays++;
         } else {
-            return consecutiveDays; 
+            return consecutiveDays;
         }
         currentDate = subDays(currentDate, 1);
     }
 
-    
+
     const history = employee.history || {};
-    const historyDates = Object.keys(history).sort((a,b) => parseISO(b).getTime() - parseISO(a).getTime()); 
+    const historyDates = Object.keys(history).sort((a,b) => parseISO(b).getTime() - parseISO(a).getTime());
 
     for (const histDateStr of historyDates) {
-        if (format(currentDate, 'yyyy-MM-dd') !== histDateStr) { 
+        if (format(currentDate, 'yyyy-MM-dd') !== histDateStr) {
             return consecutiveDays;
         }
         try {
@@ -205,7 +205,7 @@ function getConsecutiveDaysOfTypeBefore(
             currentDate = subDays(currentDate, 1);
         } catch (e) {
             console.warn(`Error parseando fecha de historial ${histDateStr} para empleado ${employee.name}. Omitiendo.`);
-            return consecutiveDays; 
+            return consecutiveDays;
         }
     }
     return consecutiveDays;
@@ -220,120 +220,111 @@ function canWorkShift(
     relaxedMode: boolean = false,
     maxConsecutiveWorkDays: number,
     maxConsecutiveNonWorkDays: number,
-    isNightShiftEnabled: boolean
+    isNightShiftEnabled: boolean,
+    minWorkDaysBeforeRest: number
 ): boolean {
     const day = schedule.days.find(d => d.date === dateStr);
     if (!day) return false;
 
-    if (shift === null) return true; 
+    if (shift === null) return true;
 
     if (shift === 'N' && !isNightShiftEnabled) {
-        return false; 
+        return false;
     }
 
     const existingShift = day.shifts[employee.id];
-    
+
     if ((existingShift === 'LAO' || existingShift === 'LM') && existingShift !== shift) {
         return false;
     }
 
-    
-    if (isNightShiftEnabled && (shift === 'M' || shift === 'T')) {
-        const prevDate = subDays(parseISO(dateStr), 1);
-        const prevDateStr = format(prevDate, 'yyyy-MM-dd');
-        const prevDayInSchedule = schedule.days.find(d => d.date === prevDateStr);
-        let prevShiftVal: ShiftType | null = null;
-        if (prevDayInSchedule) {
-            prevShiftVal = prevDayInSchedule.shifts[employee.id];
-        } else {
-            prevShiftVal = employee.history?.[prevDateStr] || null;
-        }
-        if (prevShiftVal === 'N') {
-            return false; 
-        }
-    }
-    
-    const workShiftsToCheck: ShiftType[] = isNightShiftEnabled ? ['M', 'T', 'N'] : ['M', 'T'];
+    const consecutiveWorkDaysEndingYesterday = getConsecutiveDaysOfTypeBefore(employee.id, dateStr, schedule, employees, ['work'], isNightShiftEnabled);
 
-    if (!relaxedMode) {
-        if (workShiftsToCheck.includes(shift)) { 
-            const consecutiveWorkBefore = getConsecutiveDaysOfTypeBefore(employee.id, dateStr, schedule, employees, ['work'], isNightShiftEnabled);
-            if (consecutiveWorkBefore >= maxConsecutiveWorkDays) {
-                return false;
+    if (shift === 'M' || shift === 'T' || (isNightShiftEnabled && shift === 'N')) { // Is it a work shift?
+        if (!relaxedMode) {
+            if (consecutiveWorkDaysEndingYesterday >= maxConsecutiveWorkDays) {
+                return false; // Must rest
+            }
+            if (isNightShiftEnabled && (shift === 'M' || shift === 'T')) { // Post-N rest
+                const prevDate = subDays(parseISO(dateStr), 1);
+                const prevDateStr = format(prevDate, 'yyyy-MM-dd');
+                const prevDayInSchedule = schedule.days.find(d => d.date === prevDateStr);
+                let prevShiftVal: ShiftType | null = prevDayInSchedule?.shifts[employee.id] ?? employee.history?.[prevDateStr] ?? null;
+                if (prevShiftVal === 'N') {
+                    return false;
+                }
+            }
+            if (shift === 'M') { // T -> M rest
+                const prevDate = subDays(parseISO(dateStr), 1);
+                const prevDateStr = format(prevDate, 'yyyy-MM-dd');
+                const prevDaySchedule = schedule.days.find(d => d.date === prevDateStr);
+                let prevShiftVal: ShiftType | null = prevDaySchedule?.shifts[employee.id] ?? employee.history?.[prevDateStr] ?? null;
+                if (prevShiftVal === 'T') return false;
             }
         }
-        
-        if (shift === 'M') {
-            const prevDate = subDays(parseISO(dateStr), 1);
-            const prevDateStr = format(prevDate, 'yyyy-MM-dd');
-            const prevDaySchedule = schedule.days.find(d => d.date === prevDateStr);
-            let prevShiftVal: ShiftType | null = null;
-
-            if (prevDaySchedule) {
-                prevShiftVal = prevDaySchedule.shifts[employee.id];
-            } else {
-                prevShiftVal = employee.history?.[prevDateStr] || null;
-            }
-            if (prevShiftVal === 'T') return false;
-        }
-    }
-
-    
-    if (shift === 'D' || shift === 'F' || shift === 'C') {
+    } else if (shift === 'D' || shift === 'F' || shift === 'C') { // Is it a non-work shift?
         const consecutiveNonWorkBefore = getConsecutiveDaysOfTypeBefore(employee.id, dateStr, schedule, employees, ['nonWork'], isNightShiftEnabled);
         if (consecutiveNonWorkBefore >= maxConsecutiveNonWorkDays) {
             return false;
         }
+        if (shift === 'D' && day.isHoliday) {
+            return false;
+        }
+        // New rule: Don't assign D/F/C if it breaks a short work block prematurely, unless forced by maxConsecutiveWorkDays
+        if (!relaxedMode) {
+            const mustRestDueToMaxWork = consecutiveWorkDaysEndingYesterday >= maxConsecutiveWorkDays;
+            if (!mustRestDueToMaxWork) {
+                if (consecutiveWorkDaysEndingYesterday > 0 && consecutiveWorkDaysEndingYesterday < minWorkDaysBeforeRest) {
+                    return false; // Don't break short work blocks if max work days not reached
+                }
+            }
+        }
     }
 
-    
-    if (shift === 'D' && day.isHoliday) {
-        return false;
-    }
 
-    
     const prefs = employee.preferences || {};
     if (prefs.fixedAssignments?.some(a => {
         if (a.date === dateStr) {
-            if(a.shift === 'N' && !isNightShiftEnabled) return false; 
+            if(a.shift === 'N' && !isNightShiftEnabled) return false;
 
-            
-            if ((a.shift === 'D' || a.shift === 'F' || a.shift === 'C') && workShiftsToCheck.includes(shift)) {
+
+            if ((a.shift === 'D' || a.shift === 'F' || a.shift === 'C') && (shift === 'M' || shift === 'T' || (isNightShiftEnabled && shift === 'N'))) {
                 return true;
             }
-            
-            const allWorkOrRestShifts: ShiftType[] = [...workShiftsToCheck, 'D', 'F', 'C'];
+
+            const allWorkOrRestShifts: ShiftType[] = [...(isNightShiftEnabled ? ['M','T','N'] : ['M','T']), 'D', 'F', 'C'];
             if (a.shift !== shift && allWorkOrRestShifts.includes(shift) && allWorkOrRestShifts.includes(a.shift) ) {
                  return true;
             }
         }
         return false;
     })) {
-        if (existingShift !== 'LAO' && existingShift !== 'LM') { 
+        if (existingShift !== 'LAO' && existingShift !== 'LM') {
              return false;
         }
     }
 
-    
+
     if (prefs.fixedWorkShift) {
         const { dayOfWeek: daysOfWeek, shift: fixedShiftValue } = prefs.fixedWorkShift;
-        if (fixedShiftValue === 'N' && !isNightShiftEnabled) return true; 
+        if (fixedShiftValue === 'N' && !isNightShiftEnabled) return true;
 
         if (Array.isArray(daysOfWeek) && fixedShiftValue) {
             const currentDayOfWeek = getDay(parseISO(dateStr));
             const requiresFixedShiftThisDay = daysOfWeek.includes(currentDayOfWeek) && !day.isHoliday;
 
             if (requiresFixedShiftThisDay) {
-                
+
                 if (shift !== fixedShiftValue && existingShift !== 'LAO' && existingShift !== 'LM') {
                     return false;
                 }
-            } else { 
-                
-                if (employee.eligibleWeekend === false && workShiftsToCheck.includes(shift!)) {
-                     if (day.isWeekend || day.isHoliday) { 
-                        if (existingShift !== 'LAO' && existingShift !== 'LM') { 
-                            return false; 
+            } else {
+
+                const workShiftsCheck = isNightShiftEnabled ? ['M','T','N'] : ['M','T'];
+                 if (employee.eligibleWeekend === false && workShiftsCheck.includes(shift!)) {
+                     if (day.isWeekend || day.isHoliday) {
+                        if (existingShift !== 'LAO' && existingShift !== 'LM') {
+                            return false;
                         }
                      }
                 }
@@ -351,22 +342,23 @@ function assignShift(
     relaxedMode: boolean = false,
     maxConsecutiveWorkDays: number,
     maxConsecutiveNonWorkDays: number,
-    isNightShiftEnabled: boolean
+    isNightShiftEnabled: boolean,
+    minWorkDaysBeforeRest: number
 ) {
   const day = schedule.days.find(d => d.date === dateStr);
   if (!day) return;
 
   const currentShift = day.shifts[employeeId];
 
-  
+
   if (currentShift === null || (currentShift !== 'LAO' && currentShift !== 'LM')) {
       const employee = currentEmployeesState.find(e => e.id === employeeId);
-      if (employee && canWorkShift(employee, dateStr, shift, schedule, currentEmployeesState, relaxedMode, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, isNightShiftEnabled)) {
+      if (employee && canWorkShift(employee, dateStr, shift, schedule, currentEmployeesState, relaxedMode, maxConsecutiveWorkDays, maxConsecutiveNonWorkDays, isNightShiftEnabled, minWorkDaysBeforeRest)) {
            day.shifts[employeeId] = shift;
       }
   } else if((currentShift === 'LAO' || currentShift === 'LM') && shift !== null && shift !== currentShift) {
-       
-       
+
+
   }
 }
 
@@ -443,8 +435,8 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
         if (shift === 'M') { day.totals.M++; currentEmpTotals.M++; currentEmpTotals.workedDays++; }
         else if (shift === 'T') { day.totals.T++; currentEmpTotals.T++; currentEmpTotals.workedDays++; }
         else if (shift === 'N' && isNightShiftEnabled) { day.totals.N++; currentEmpTotals.N++; currentEmpTotals.workedDays++; }
-        else if (shift === 'N' && !isNightShiftEnabled) { 
-             day.shifts[empId] = null; 
+        else if (shift === 'N' && !isNightShiftEnabled) {
+             day.shifts[empId] = null;
         }
         else if (shift === 'D') { day.totals.D++; currentEmpTotals.D++; }
         else if (shift === 'F') { day.totals.F++; currentEmpTotals.F++; }
@@ -457,13 +449,13 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
          if (dayOfWeek === 0 && !workShifts.includes(shift!)) currentEmpTotals.freeSundays++;
 
     });
-     day.totals.TPT = day.totals.M + day.totals.T; 
-     if(!isNightShiftEnabled) day.totals.N = 0; 
+     day.totals.TPT = day.totals.M + day.totals.T;
+     if(!isNightShiftEnabled) day.totals.N = 0;
   });
 
     employees.forEach(emp => {
          if (!isNightShiftEnabled && schedule.employeeTotals[emp.id]) {
-            schedule.employeeTotals[emp.id].N = 0; 
+            schedule.employeeTotals[emp.id].N = 0;
          }
          const totals = schedule.employeeTotals[emp.id];
          if (!totals) {
@@ -486,7 +478,7 @@ export function calculateFinalTotals(schedule: Schedule, employees: Employee[], 
              });
 
              if (!isOnLeaveFullMonth) {
-                
+
              }
          }
     });
@@ -508,6 +500,7 @@ export function validateSchedule(
   const results: ValidationResult[] = reportAccumulator || [];
   const employeeMap = new Map(employees.map(e => [e.id, e]));
   const baseWeekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
+  const MIN_WORK_DAYS_BEFORE_PREFERRED_REST = 3; // Consistent with iterativeAssignShifts
 
 
   let prio1Passed = true;
@@ -536,7 +529,7 @@ export function validateSchedule(
    });
     employees.forEach(emp => {
         emp.preferences?.fixedAssignments?.forEach(fixed => {
-            if(fixed.shift === 'N' && !isNightShiftEnabled) return; 
+            if(fixed.shift === 'N' && !isNightShiftEnabled) return;
             const day = schedule.days.find(d => d.date === fixed.date);
             if (day && day.shifts[emp.id] !== fixed.shift && day.shifts[emp.id] !== 'LAO' && day.shifts[emp.id] !== 'LM') {
                  results.push({
@@ -550,7 +543,7 @@ export function validateSchedule(
          const fixedW = emp.preferences?.fixedWorkShift;
           if(fixedW){
               const { dayOfWeek: daysOfWeek, shift: fixedShift } = fixedW;
-              if(fixedShift === 'N' && !isNightShiftEnabled) return; 
+              if(fixedShift === 'N' && !isNightShiftEnabled) return;
 
               if(Array.isArray(daysOfWeek) && fixedShift){
                   schedule.days.forEach(day => {
@@ -589,7 +582,7 @@ export function validateSchedule(
 
    let prio2Passed = true;
    schedule.days.forEach(day => {
-     const { M, T, N, TPT } = day.totals; 
+     const { M, T, N, TPT } = day.totals;
      let dayPassed = true;
      let details = [];
 
@@ -605,7 +598,7 @@ export function validateSchedule(
           dayPassed = false;
          details.push(`T=${T} (<${operationalRules.minCoverageT})`);
      }
-      if (isNightShiftEnabled && N < operationalRules.minCoverageN) { 
+      if (isNightShiftEnabled && N < operationalRules.minCoverageN) {
          dayPassed = false;
          details.push(`N=${N} (<${operationalRules.minCoverageN})`);
      }
@@ -685,7 +678,7 @@ export function validateSchedule(
         const date1 = parseISO(day1.date);
         const date2 = parseISO(day2.date);
         if (!isValid(date1) || !isValid(date2)) continue;
-         if (getDay(date1) === 6 && getDay(date2) === 0) { 
+         if (getDay(date1) === 6 && getDay(date2) === 0) {
            const shift1 = day1.shifts[emp.id];
            const shift2 = day2.shifts[emp.id];
            const isRestDay1 = shift1 === 'D' || shift1 === 'C' || (day1.isHoliday && shift1 === 'F');
@@ -749,7 +742,7 @@ export function validateSchedule(
                currentConsecutiveNonWork++;
                maxForEmployeeWork = Math.max(maxForEmployeeWork, currentConsecutiveWork);
                currentConsecutiveWork = 0;
-           } else { 
+           } else {
                 maxForEmployeeWork = Math.max(maxForEmployeeWork, currentConsecutiveWork);
                 currentConsecutiveWork = 0;
                 maxForEmployeeNonWork = Math.max(maxForEmployeeNonWork, currentConsecutiveNonWork);
@@ -806,12 +799,12 @@ export function validateSchedule(
         });
     }
 
-    
+
     if (isNightShiftEnabled) {
         let postNightRestViolations = 0;
         let postNightRestDetails: string[] = [];
         employees.forEach(emp => {
-            for (let i = 0; i < schedule.days.length -1; i++) { 
+            for (let i = 0; i < schedule.days.length -1; i++) {
                 const currentDay = schedule.days[i];
                 const nextDay = schedule.days[i+1];
                 const currentShift = currentDay.shifts[emp.id];
@@ -896,13 +889,13 @@ export function validateSchedule(
                         const dateNextDay1 = parseISO(nextDay1.date);
                         const dateNextDay2 = parseISO(nextDay2.date);
 
-                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 && 
-                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) { 
-                            
+                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 &&
+                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) {
+
                             let missedCompensatorySat = false;
                             let missedCompensatorySun = false;
 
-                            
+
                             if (!['D', 'C', 'LAO', 'LM'].includes(nextDay1.shifts[emp.id]!)) {
                                 missedCompensatorySat = true;
                             }
@@ -955,14 +948,14 @@ export function validateSchedule(
          const empTotals = schedule.employeeTotals[emp.id];
          if (!empTotals) return;
 
-         if(emp.preferences?.fixedWorkShift) return; 
+         if(emp.preferences?.fixedWorkShift) return;
 
          const { M, T, N } = empTotals;
          const workShiftsCounts = isNightShiftEnabled ? [M,T,N].filter(count => count > 0) : [M,T].filter(count => count > 0);
-         if (workShiftsCounts.length > 1) { 
+         if (workShiftsCounts.length > 1) {
             const minCount = Math.min(...workShiftsCounts);
             const maxCount = Math.max(...workShiftsCounts);
-            if (maxCount > minCount * 2 && maxCount - minCount > 5) { 
+            if (maxCount > minCount * 2 && maxCount - minCount > 5) {
                 balanceIssues++;
             }
          }
@@ -994,7 +987,7 @@ export function validateSchedule(
              if (violations.length > 0) {
                 results.push({
                     rule: `Preferencia Flexible - ${emp.name}`,
-                    passed: true, 
+                    passed: true,
                     details: `Desajustes de Preferencia: ${violations.slice(0,2).join(', ')}${violations.length > 2 ? '...' : ''}`
                 });
             }
@@ -1007,7 +1000,7 @@ export function validateSchedule(
     schedule.days.forEach(day => {
         employees.forEach(emp => {
             if (day.shifts[emp.id] === null) {
-                
+
                 const isOnLeaveFullMonth = absences.some(a => {
                     if (a.employeeId !== emp.id || !a.startDate || !a.endDate) return false;
                     try {
@@ -1046,27 +1039,27 @@ export function validateSchedule(
          const getPrio = (rule: string): number => {
               if (rule.includes("Completitud") || rule.includes("Ranura Vacía Persistente")) return 0;
              if (rule.startsWith("Prioridad 1")) return 1;
-             if (rule.startsWith("Prioridad 2 Alerta Grave")) return 1.5; 
-             if (rule.startsWith("Prioridad 2 Info - Asignación Relajada")) return 2.1; 
+             if (rule.startsWith("Prioridad 2 Alerta Grave")) return 1.5;
+             if (rule.startsWith("Prioridad 2 Info - Asignación Relajada")) return 2.1;
              if (rule.startsWith("Prioridad 2")) return 2;
              if (rule.startsWith("Prioridad 3")) return 3;
              if (rule.startsWith("Prioridad 4")) return 4;
              if (rule.startsWith("Prioridad 5")) return 5;
-             if (rule.startsWith("Flexible 1")) return 6; 
+             if (rule.startsWith("Flexible 1")) return 6;
              if (rule.startsWith("Flexible - Descanso Compensatorio")) return 6.5;
-             if (rule.startsWith("Flexible 5")) return 7; 
-             if (rule.startsWith("Flexible 4")) return 8; 
+             if (rule.startsWith("Flexible 5")) return 7;
+             if (rule.startsWith("Flexible 4")) return 8;
              if (rule.startsWith("Preferencia Flexible")) return 9;
-             if (rule.startsWith("Flexible")) return 10; 
-             if (rule.startsWith("Info Generador")) return 12; 
-             return 11; 
+             if (rule.startsWith("Flexible")) return 10;
+             if (rule.startsWith("Info Generador")) return 12;
+             return 11;
          }
          const prioA = getPrio(a.rule);
          const prioB = getPrio(b.rule);
 
-         if (prioA !== prioB) return prioA - prioB; 
-         if (a.passed !== b.passed) return a.passed ? 1 : -1; 
-         return a.rule.localeCompare(b.rule); 
+         if (prioA !== prioB) return prioA - prioB;
+         if (a.passed !== b.passed) return a.passed ? 1 : -1;
+         return a.rule.localeCompare(b.rule);
      });
 
   return results;
@@ -1075,7 +1068,7 @@ export function validateSchedule(
 
 let currentEmployeesState: Employee[] = [];
 
-const MIN_WORK_DAYS_BEFORE_PREFERRED_REST = 3; 
+
 
 function isFullMonthLeave(employee: Employee, absences: Absence[], dayDateStr: string, scheduleYear: number, scheduleMonth: number): boolean {
     return absences.some(a => {
@@ -1105,7 +1098,8 @@ function iterativeAssignShifts(
     isNightShiftEnabled: boolean
 ) {
     const baseWeekendDaysInMonth = countWeekendDaysInMonth(schedule.year, schedule.month);
-    currentEmployeesState = employees; 
+    currentEmployeesState = employees;
+    const MIN_WORK_DAYS_BEFORE_PREFERRED_REST = 3; // Minimum work days before a D/F is preferred
 
     const calculateDayTotals = (day: ScheduleDay) => {
         day.totals = { M: 0, T: 0, N:0, D: 0, F: 0, LM: 0, LAO: 0, C: 0, TPT: 0 };
@@ -1119,7 +1113,7 @@ function iterativeAssignShifts(
             else if (s === 'LAO') day.totals.LAO++;
             else if (s === 'C') day.totals.C++;
         });
-        day.totals.TPT = day.totals.M + day.totals.T; 
+        day.totals.TPT = day.totals.M + day.totals.T;
         if (!isNightShiftEnabled) day.totals.N = 0;
     };
 
@@ -1127,7 +1121,7 @@ function iterativeAssignShifts(
     console.log("Iteración 1: Cobertura Esencial (M/T/N)");
     schedule.days.forEach(day => {
         const dateStr = day.date;
-        calculateDayTotals(day); 
+        calculateDayTotals(day);
 
         let availableEmployees = employees.filter(e => day.shifts[e.id] === null);
 
@@ -1135,8 +1129,8 @@ function iterativeAssignShifts(
             if (shiftType === 'N' && !isNightShiftEnabled) return false;
 
             const candidates = availableEmployees
-                .filter(e => day.shifts[e.id] === null && canWorkShift(e, dateStr, shiftType, schedule, employees, relaxed, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled))
-                .sort((a, b) => { 
+                .filter(e => day.shifts[e.id] === null && canWorkShift(e, dateStr, shiftType, schedule, employees, relaxed, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST))
+                .sort((a, b) => {
                     const totalsA = schedule.employeeTotals[a.id] || { workedDays: 0, M: 0, T: 0, N: 0 };
                     const totalsB = schedule.employeeTotals[b.id] || { workedDays: 0, M: 0, T: 0, N: 0 };
                     if (totalsA.workedDays !== totalsB.workedDays) {
@@ -1150,10 +1144,10 @@ function iterativeAssignShifts(
 
             if (candidates.length > 0) {
                 const chosenEmployee = candidates[0];
-                assignShift(chosenEmployee.id, dateStr, shiftType, schedule, relaxed, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
-                if (day.shifts[chosenEmployee.id] === shiftType) { 
-                    calculateDayTotals(day); 
-                    
+                assignShift(chosenEmployee.id, dateStr, shiftType, schedule, relaxed, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
+                if (day.shifts[chosenEmployee.id] === shiftType) {
+                    calculateDayTotals(day);
+
                     if(schedule.employeeTotals[chosenEmployee.id]) {
                         schedule.employeeTotals[chosenEmployee.id].workedDays++;
                         if(shiftType === 'M') schedule.employeeTotals[chosenEmployee.id].M++;
@@ -1161,7 +1155,7 @@ function iterativeAssignShifts(
                         if(shiftType === 'N' && isNightShiftEnabled) schedule.employeeTotals[chosenEmployee.id].N++;
                     }
 
-                    availableEmployees = availableEmployees.filter(e => e.id !== chosenEmployee.id); 
+                    availableEmployees = availableEmployees.filter(e => e.id !== chosenEmployee.id);
                     if(relaxed) {
                         console.warn(`Pase 1 (${dateStr}): Asignación RELAJADA de ${shiftType} a ${chosenEmployee.name} (${chosenEmployee.id}) para cobertura.`);
                         if (!report.find(r => r.rule.includes(`Asignación Relajada (${chosenEmployee.name} en ${format(parseISO(day.date), 'dd/MM', { locale: es })})`) && r.details?.includes(shiftType))) {
@@ -1174,33 +1168,33 @@ function iterativeAssignShifts(
             return false;
         };
 
-        
+
         while (day.totals.M < operationalRules.minCoverageM) {
             if (!assignShiftIfPossible('M', false)) break;
         }
-        
+
         while (day.totals.T < operationalRules.minCoverageT) {
             if (!assignShiftIfPossible('T', false)) break;
         }
-        
+
         if (isNightShiftEnabled) {
             while (day.totals.N < operationalRules.minCoverageN) {
                 if (!assignShiftIfPossible('N', false)) break;
             }
         }
-        
+
         while (day.totals.TPT < operationalRules.minCoverageTPT) {
             if (day.totals.M <= day.totals.T) {
                 if (assignShiftIfPossible('M', false)) continue;
-                if (assignShiftIfPossible('T', false)) continue; 
-            } else { 
                 if (assignShiftIfPossible('T', false)) continue;
-                if (assignShiftIfPossible('M', false)) continue; 
+            } else {
+                if (assignShiftIfPossible('T', false)) continue;
+                if (assignShiftIfPossible('M', false)) continue;
             }
-            break; 
+            break;
         }
 
-        
+
         const tptStillNotMet = day.totals.TPT < operationalRules.minCoverageTPT;
         const mStillNotMet = day.totals.M < operationalRules.minCoverageM;
         const tStillNotMet = day.totals.T < operationalRules.minCoverageT;
@@ -1211,31 +1205,31 @@ function iterativeAssignShifts(
             if(tStillNotMet) console.warn(`Pase 1 (${dateStr}): T < ${operationalRules.minCoverageT} (${day.totals.T}). Intentando con restricciones relajadas para T.`);
             if(nStillNotMet) console.warn(`Pase 1 (${dateStr}): N < ${operationalRules.minCoverageN} (${day.totals.N}). Intentando con restricciones relajadas para N.`);
             if(tptStillNotMet && !mStillNotMet && !tStillNotMet ) console.warn(`Pase 1 (${dateStr}): TPT < ${operationalRules.minCoverageTPT} (${day.totals.TPT}). Intentando con restricciones relajadas para TPT.`);
-            
-            availableEmployees = employees.filter(e => day.shifts[e.id] === null); 
 
-            
+            availableEmployees = employees.filter(e => day.shifts[e.id] === null);
+
+
             while (day.totals.M < operationalRules.minCoverageM) {
-                if (!assignShiftIfPossible('M', true)) break; 
+                if (!assignShiftIfPossible('M', true)) break;
             }
-            
+
             while (day.totals.T < operationalRules.minCoverageT) {
-                if (!assignShiftIfPossible('T', true)) break; 
+                if (!assignShiftIfPossible('T', true)) break;
             }
-             
+
             if (isNightShiftEnabled) {
                 while (day.totals.N < operationalRules.minCoverageN) {
-                    if (!assignShiftIfPossible('N', true)) break; 
+                    if (!assignShiftIfPossible('N', true)) break;
                 }
             }
-            
-            
+
+
             while (day.totals.TPT < operationalRules.minCoverageTPT) {
                 let assignedInRelaxedTPTIteration = false;
-                 if (day.totals.M <= day.totals.T) { 
+                 if (day.totals.M <= day.totals.T) {
                     if (assignShiftIfPossible('M', true)) { assignedInRelaxedTPTIteration = true; }
                     else if (assignShiftIfPossible('T', true)) { assignedInRelaxedTPTIteration = true; }
-                 } else { 
+                 } else {
                     if (assignShiftIfPossible('T', true)) { assignedInRelaxedTPTIteration = true; }
                     else if (assignShiftIfPossible('M', true)) { assignedInRelaxedTPTIteration = true; }
                  }
@@ -1243,30 +1237,30 @@ function iterativeAssignShifts(
                 if (!assignedInRelaxedTPTIteration) {
                     console.error(`Pase 1 (${dateStr}): IMPOSIBLE cumplir TPT >= ${operationalRules.minCoverageTPT} incluso con restricciones relajadas. Actual TPT: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}.`);
                     const ruleKey = `Prioridad 2 Alerta Grave - Cobertura TPT (${format(parseISO(day.date), 'dd/MM', { locale: es })})`;
-                    if (!report.some(r => r.rule === ruleKey)) { 
+                    if (!report.some(r => r.rule === ruleKey)) {
                         report.push({ rule: ruleKey, passed: false, details: `Falló: No se pudo alcanzar TPT >= ${operationalRules.minCoverageTPT}. TPT Actual: ${day.totals.TPT}, M: ${day.totals.M}, T: ${day.totals.T}. Posibles causas: empleados no disponibles (LAO/LM) o conflictos con asignaciones/preferencias fijas no flexibles.` });
                     }
-                    break; 
+                    break;
                 }
             }
         }
-         
-         calculateDayTotals(day); 
+
+         calculateDayTotals(day);
          if (day.totals.TPT > operationalRules.minCoverageTPT && !day.isHoliday && !day.isWeekend && day.totals.M <= day.totals.T) {
              console.warn(`Pase 1 (${dateStr}): TPT > ${operationalRules.minCoverageTPT} pero M (${day.totals.M}) <= T (${day.totals.T}). Intentando asignar M adicional.`);
-             availableEmployees = employees.filter(e => day.shifts[e.id] === null); 
-             if (!assignShiftIfPossible('M', false)) { 
-                 assignShiftIfPossible('M', true);    
+             availableEmployees = employees.filter(e => day.shifts[e.id] === null);
+             if (!assignShiftIfPossible('M', false)) {
+                 assignShiftIfPossible('M', true);
              }
          }
     });
-    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled); 
+    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled);
 
     console.log("Iteración 2: Dotación Objetivo/Preferida");
     schedule.days.forEach(day => {
         const dateStr = day.date;
-        calculateDayTotals(day); 
-        
+        calculateDayTotals(day);
+
         const targetM = day.isWeekend || day.isHoliday ? targetStaffing.weekendHolidayMorning : targetStaffing.workdayMorning;
         const targetTValue = day.isWeekend || day.isHoliday ? targetStaffing.weekendHolidayAfternoon : targetStaffing.workdayAfternoon;
         const targetNValue = isNightShiftEnabled ? (day.isWeekend || day.isHoliday ? targetStaffing.weekendHolidayNight : targetStaffing.workdayNight) : 0;
@@ -1279,7 +1273,7 @@ function iterativeAssignShifts(
             let count = currentCount;
             while (count < targetCount) {
                 const candidates = availableEmployees
-                    .filter(e => day.shifts[e.id] === null && canWorkShift(e, dateStr, shiftType, schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) 
+                    .filter(e => day.shifts[e.id] === null && canWorkShift(e, dateStr, shiftType, schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST))
                     .sort((a,b) => {
                         const aTotals = schedule.employeeTotals[a.id] || { M: 0, T: 0, N: 0 };
                         const bTotals = schedule.employeeTotals[b.id] || { M: 0, T: 0, N: 0 };
@@ -1290,10 +1284,10 @@ function iterativeAssignShifts(
                     });
                 if (candidates.length === 0) break;
                 const chosenEmployee = candidates[0];
-                assignShift(chosenEmployee.id, dateStr, shiftType, schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                assignShift(chosenEmployee.id, dateStr, shiftType, schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                 if (day.shifts[chosenEmployee.id] === shiftType) {
                     count++;
-                    calculateDayTotals(day); 
+                    calculateDayTotals(day);
                      if(schedule.employeeTotals[chosenEmployee.id]) {
                         schedule.employeeTotals[chosenEmployee.id].workedDays++;
                         if(shiftType === 'M') schedule.employeeTotals[chosenEmployee.id].M++;
@@ -1313,9 +1307,9 @@ function iterativeAssignShifts(
             assignToTarget('N', day.totals.N, targetNValue);
         }
     });
-    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled); 
+    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled);
 
-    console.log("Iteración 2.5: Asignar Descanso Compensatorio (D/C) Post-Feriado");
+    console.log("Iteración 2.5: Asignar Descanso Compensatorio (D/C) Post-Feriado Trabajado (si aplica)");
     schedule.days.forEach((day, dayIndex) => {
         if (day.isHoliday) {
             employees.forEach(emp => {
@@ -1331,18 +1325,18 @@ function iterativeAssignShifts(
                         const dateNextDay1 = parseISO(nextDay1.date);
                         const dateNextDay2 = parseISO(nextDay2.date);
 
-                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 && 
-                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) { 
+                        if (isValid(dateNextDay1) && getDay(dateNextDay1) === 6 &&
+                            isValid(dateNextDay2) && getDay(dateNextDay2) === 0) {
 
                             const assignCompensatory = (empToAssign: Employee, dayToAssign: ScheduleDay, shiftToAssign: ShiftType.D | ShiftType.C) => {
                                 if (dayToAssign.shifts[empToAssign.id] === null || (dayToAssign.shifts[empToAssign.id] !== 'LAO' && dayToAssign.shifts[empToAssign.id] !== 'LM')) {
-                                    if (canWorkShift(empToAssign, dayToAssign.date, shiftToAssign, schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) {
-                                        assignShift(empToAssign.id, dayToAssign.date, shiftToAssign, schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                                    if (canWorkShift(empToAssign, dayToAssign.date, shiftToAssign, schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                                        assignShift(empToAssign.id, dayToAssign.date, shiftToAssign, schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                                     }
                                 }
                             };
-                            
-                            assignCompensatory(emp, nextDay1, 'D');
+
+                            assignCompensatory(emp, nextDay1, 'D'); // Prioritize D for compensatory, can be C if manual
                             assignCompensatory(emp, nextDay2, 'D');
                         }
                     }
@@ -1367,23 +1361,21 @@ function iterativeAssignShifts(
                 const consWorkA = getConsecutiveDaysOfTypeBefore(a.id, dateStr, schedule, employees, ['work'], isNightShiftEnabled);
                 const consWorkB = getConsecutiveDaysOfTypeBefore(b.id, dateStr, schedule, employees, ['work'], isNightShiftEnabled);
 
-                // Prio 1: Must rest (at max)
-                if (consWorkA >= maxConsecutiveWorkDays && consWorkB < maxConsecutiveWorkDays) return -1;
-                if (consWorkA < maxConsecutiveWorkDays && consWorkB >= maxConsecutiveWorkDays) return 1;
+                // Prioridad 1: Debe descansar (alcanzó maxConsecutiveWorkDays)
+                const aMustRest = consWorkA >= maxConsecutiveWorkDays;
+                const bMustRest = consWorkB >= maxConsecutiveWorkDays;
+                if (aMustRest && !bMustRest) return -1;
+                if (!aMustRest && bMustRest) return 1;
 
-                // Prio 2: Closer to max work days (those with more work get rest first)
-                if (consWorkA !== consWorkB && consWorkA >= MIN_WORK_DAYS_BEFORE_PREFERRED_REST && consWorkB >= MIN_WORK_DAYS_BEFORE_PREFERRED_REST) { // Only if both have met min work block
-                    return consWorkB - consWorkA;
-                }
-                
-                // Prio 3: Penalize breaking short work blocks if they can still work more
-                const aInShortBlockAndCanWorkMore = consWorkA > 0 && consWorkA < MIN_WORK_DAYS_BEFORE_PREFERRED_REST && consWorkA < maxConsecutiveWorkDays;
-                const bInShortBlockAndCanWorkMore = consWorkB > 0 && consWorkB < MIN_WORK_DAYS_BEFORE_PREFERRED_REST && consWorkB < maxConsecutiveWorkDays;
+                // Prioridad 2: Evitar romper bloques cortos si no es necesario
+                const aInShortBlock = consWorkA > 0 && consWorkA < MIN_WORK_DAYS_BEFORE_PREFERRED_REST;
+                const bInShortBlock = consWorkB > 0 && consWorkB < MIN_WORK_DAYS_BEFORE_PREFERRED_REST;
 
-                if (aInShortBlockAndCanWorkMore && !bInShortBlockAndCanWorkMore) return 1; 
-                if (!aInShortBlockAndCanWorkMore && bInShortBlockAndCanWorkMore) return -1; 
+                if (aInShortBlock && !aMustRest && (!bInShortBlock || bMustRest)) return 1; // a está en bloque corto y puede seguir, b no o debe descansar -> b descansa primero
+                if (bInShortBlock && !bMustRest && (!aInShortBlock || aMustRest)) return -1; // b está en bloque corto y puede seguir, a no o debe descansar -> a descansa primero
 
-                // Prio 4: Fewer 'D's relative to target
+
+                // Prioridad 3: Necesita más 'D' para alcanzar objetivo
                 const aTotals = schedule.employeeTotals[a.id] || { D: 0 };
                 const bTotals = schedule.employeeTotals[b.id] || { D: 0 };
                 const aNeedsDMore = aTotals.D < employeeDTargets[a.id];
@@ -1391,26 +1383,34 @@ function iterativeAssignShifts(
 
                 if (aNeedsDMore && !bNeedsDMore) return -1;
                 if (!aNeedsDMore && bNeedsDMore) return 1;
+
+                // Prioridad 4: Tiene menos 'D' en total
                 if (aTotals.D !== bTotals.D) return aTotals.D - bTotals.D;
+
+                // Prioridad 5 (tie-breaker): Ha trabajado más días consecutivos (si ambos no están en bloque corto)
+                if (!aInShortBlock && !bInShortBlock) {
+                    return consWorkB - consWorkA;
+                }
 
                 return 0;
          });
 
          employeesSortedForRest.forEach(emp => {
-             if (day.shifts[emp.id] === null) { 
+             if (day.shifts[emp.id] === null) {
                 let assignedRest = false;
                  if (day.isHoliday) {
-                     if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) {
-                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                     if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                         assignedRest = day.shifts[emp.id] === 'F';
                      }
                  }
                  if (!assignedRest) {
-                     if (canWorkShift(emp, dateStr, 'D', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) {
-                          assignShift(emp.id, dateStr, 'D', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                     if (canWorkShift(emp, dateStr, 'D', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                          assignShift(emp.id, dateStr, 'D', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                           assignedRest = day.shifts[emp.id] === 'D';
-                     } else if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) { 
-                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                     } else if (day.isHoliday && canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                        // Re-try F for holidays if D failed (e.g. max D reached, but F is fine for holiday)
+                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                         assignedRest = day.shifts[emp.id] === 'F';
                      }
                  }
@@ -1420,12 +1420,13 @@ function iterativeAssignShifts(
                     if(empTotal){
                         if(day.shifts[emp.id] === 'D') empTotal.D++;
                         else if(day.shifts[emp.id] === 'F') empTotal.F++;
+                        else if(day.shifts[emp.id] === 'C') empTotal.C++;
                     }
                  }
              }
          });
      });
-    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled); 
+    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled);
 
     console.log("Iteración 3.5: Llenar NULOS restantes con D o F robustamente (respetando MAX_CONSECUTIVE_NON_WORK_DAYS)");
     schedule.days.forEach(day => {
@@ -1435,34 +1436,35 @@ function iterativeAssignShifts(
                 if (isFullMonthLeave(emp, absences, day.date, schedule.year, schedule.month)) return;
 
                 let assignedInFill = false;
-                if (day.isHoliday) { 
-                    if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) {
-                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                if (day.isHoliday) {
+                    if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                         assignedInFill = day.shifts[emp.id] === 'F';
                     }
                 }
-                if (!assignedInFill) { 
-                    if (canWorkShift(emp, dateStr, 'D', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) {
-                        assignShift(emp.id, dateStr, 'D', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                if (!assignedInFill) {
+                    if (canWorkShift(emp, dateStr, 'D', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                        assignShift(emp.id, dateStr, 'D', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                         assignedInFill = day.shifts[emp.id] === 'D';
-                    } else if (canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled)) { 
-                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled);
+                    } else if (day.isHoliday && canWorkShift(emp, dateStr, 'F', schedule, employees, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST)) {
+                        assignShift(emp.id, dateStr, 'F', schedule, false, maxConsecutiveWorkDays, maxConsecutiveRest, isNightShiftEnabled, MIN_WORK_DAYS_BEFORE_PREFERRED_REST);
                         assignedInFill = day.shifts[emp.id] === 'F';
                     }
                 }
-                 
-                if (!assignedInFill) { 
+
+
+                if (!assignedInFill) {
                     console.warn(`Pase 3.5: Aún no se puede asignar D/F a ${emp.name} (${emp.id}) en ${dateStr}. Ranura permanece NULA.`);
                     if (!report.find(r => r.rule.includes(`Ranura Vacía Persistente`) && r.details?.includes(`${emp.name} en ${dateStr}`))) {
                         report.push({ rule: `Info Generador - Ranura Vacía Persistente`, passed: false, details: `Empleado ${emp.name} en ${dateStr} no pudo ser asignado D/F en el llenado final.`});
                     }
                 } else {
-                    calculateDayTotals(day); 
+                    calculateDayTotals(day);
                 }
             }
         });
     });
-    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled); 
+    calculateFinalTotals(schedule, employees, absences, isNightShiftEnabled);
 }
 
 
@@ -1474,7 +1476,7 @@ export function generateSchedule(
   initialHolidays: Holiday[],
   targetStaffing: TargetStaffing,
   maxConsecutiveWorkDays: number,
-  maxConsecutiveRest: number, 
+  maxConsecutiveRest: number,
   operationalRules: OperationalRules,
   isNightShiftEnabled: boolean
 ): { schedule: Schedule; report: ValidationResult[] } {
@@ -1486,7 +1488,7 @@ export function generateSchedule(
   const report: ValidationResult[] = [];
 
 
-  currentEmployeesState = employeesForGeneration; 
+  currentEmployeesState = employeesForGeneration;
 
   const startTime = performance.now();
   const schedule = initializeScheduleLib(year, month, employeesForGeneration, holidaysForGeneration, isNightShiftEnabled);
@@ -1520,26 +1522,26 @@ export function generateSchedule(
          const getPrio = (rule: string): number => {
              if (rule.includes("Completitud") || rule.includes("Ranura Vacía Persistente")) return 0;
              if (rule.startsWith("Prioridad 1")) return 1;
-             if (rule.startsWith("Prioridad 2 Alerta Grave")) return 1.5; 
-             if (rule.startsWith("Prioridad 2 Info - Asignación Relajada")) return 2.1; 
+             if (rule.startsWith("Prioridad 2 Alerta Grave")) return 1.5;
+             if (rule.startsWith("Prioridad 2 Info - Asignación Relajada")) return 2.1;
              if (rule.startsWith("Prioridad 2")) return 2;
              if (rule.startsWith("Prioridad 3")) return 3;
              if (rule.startsWith("Prioridad 4")) return 4;
              if (rule.startsWith("Prioridad 5")) return 5;
-             if (rule.startsWith("Flexible 1")) return 6; 
+             if (rule.startsWith("Flexible 1")) return 6;
              if (rule.startsWith("Flexible - Descanso Compensatorio")) return 6.5;
-             if (rule.startsWith("Flexible 5")) return 7; 
-             if (rule.startsWith("Flexible 4")) return 8; 
+             if (rule.startsWith("Flexible 5")) return 7;
+             if (rule.startsWith("Flexible 4")) return 8;
              if (rule.startsWith("Preferencia Flexible")) return 9;
-             if (rule.startsWith("Flexible")) return 10; 
-             if (rule.startsWith("Info Generador")) return 12; 
-             return 11; 
+             if (rule.startsWith("Flexible")) return 10;
+             if (rule.startsWith("Info Generador")) return 12;
+             return 11;
          }
          const prioA = getPrio(a.rule);
          const prioB = getPrio(b.rule);
-         if (prioA !== prioB) return prioA - prioB; 
-         if (a.passed !== b.passed) return a.passed ? 1 : -1; 
-         return a.rule.localeCompare(b.rule); 
+         if (prioA !== prioB) return prioA - prioB;
+         if (a.passed !== b.passed) return a.passed ? 1 : -1;
+         return a.rule.localeCompare(b.rule);
      });
 
   return { schedule, report: finalReport };

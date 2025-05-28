@@ -11,11 +11,11 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSchedule as initializeScheduleLib } from '@/lib/schedule-generator';
+import { generateSchedule, calculateFinalTotals, validateSchedule, initializeScheduleLib } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
-import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid, getMonth, getYear as getFullYear } from 'date-fns';
+import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid, getYear as getFullYear, getMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react';
 import { useForm, Controller, useFieldArray } from "react-hook-form";
@@ -2089,3 +2089,5 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
     </div>
   );
 }
+
+    

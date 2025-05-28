@@ -250,7 +250,7 @@ export default function Home() {
     const newAbsence = { ...data, id: Date.now() };
     setAbsences(prev => [...prev, newAbsence]);
 
-    if (schedule) { // No need to check displayMode, if schedule exists, apply it
+    if (schedule) { 
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(newAbsence.startDate);
         const endDateAbs = parseISO(newAbsence.endDate);
@@ -263,12 +263,13 @@ export default function Home() {
                 }
             }
         });
-        setSchedule(newSchedule); // Update schedule state
+        setSchedule(newSchedule); 
         toast({
             title: "Ausencia Aplicada al Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
             variant: "default",
         });
+        if (schedule) setDisplayMode('viewing'); // Return to viewing mode if a schedule was active
     }
 
     setIsAbsenceDialogOpen(false);
@@ -300,25 +301,36 @@ export default function Home() {
      const updatedAbsence = { ...editingAbsence, ...data };
      setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? updatedAbsence : a));
      
-     if (schedule) { // No need to check displayMode, if schedule exists, apply it
+     if (schedule) { 
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(updatedAbsence.startDate);
         const endDateAbs = parseISO(updatedAbsence.endDate);
+        const employeeIdForAbsence = updatedAbsence.employeeId;
+        const absenceType = updatedAbsence.type;
 
         newSchedule.days.forEach(day => {
             const currentDate = parseISO(day.date);
+            // First, revert any old absence effect if it was this one
+            const oldAbsenceDay = schedule.days.find(d => d.date === day.date)?.shifts[employeeIdForAbsence] === editingAbsence.type;
+            if(oldAbsenceDay && (currentDate < parseISO(editingAbsence.startDate) || currentDate > parseISO(editingAbsence.endDate))){
+                 // This logic would be to revert to 'null' or a previous state,
+                 // For simplicity, we don't auto-revert to previous turn, user has to do it manually or regenerate if needed.
+                 // However, we need to make sure the new absence is applied correctly
+            }
+
             if (currentDate >= startDateAbs && currentDate <= endDateAbs) {
-                 if (newSchedule.days.find(d => d.date === day.date)?.shifts[updatedAbsence.employeeId] !== undefined) {
-                    newSchedule.days.find(d => d.date === day.date)!.shifts[updatedAbsence.employeeId] = updatedAbsence.type;
+                 if (newSchedule.days.find(d => d.date === day.date)?.shifts[employeeIdForAbsence] !== undefined) {
+                    newSchedule.days.find(d => d.date === day.date)!.shifts[employeeIdForAbsence] = absenceType;
                 }
             }
         });
-        setSchedule(newSchedule); // Update schedule state
+        setSchedule(newSchedule); 
         toast({
             title: "Ausencia Actualizada en Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
             variant: "default",
         });
+        if (schedule) setDisplayMode('viewing'); // Return to viewing mode if a schedule was active
     }
 
      setIsAbsenceDialogOpen(false);
@@ -328,7 +340,7 @@ export default function Home() {
 
   const handleDeleteAbsence = (id: number) => {
       setAbsences(prev => prev.filter(a => a.id !== id));
-      if (schedule) { // No need to check displayMode
+      if (schedule) { 
         toast({
             title: "Ausencia Eliminada",
             description: "La ausencia ha sido eliminada. Los turnos LAO/LM previamente marcados en el horario no se revierten automáticamente. Ajústalos manualmente si es necesario y recalcula.",
@@ -880,7 +892,7 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
-                    const dataCells = currentLineContent.split(';');
+                    const dataCells = currentLineContent.split(';'); // Corrected delimiter
                     const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRow = currentLineContent;
@@ -889,7 +901,7 @@ export default function Home() {
                 }
 
                 if (employeeConfigDataRow) {
-                    const cells = employeeConfigDataRow.split(';');
+                    const cells = employeeConfigDataRow.split(';'); // Corrected delimiter
                     const updatedEmployee = {
                         ...existingEmp,
                         preferences: {
@@ -2137,7 +2149,6 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                         </div>
                          <div className="flex flex-wrap gap-2">
                             <Button variant="outline" onClick={() => { 
-                                // No resetear schedule aquí para permitir volver a config y editar ausencias
                                 setDisplayMode('config'); 
                                 setCurrentStep(1);
                             }} disabled={isLoading}>
@@ -2259,5 +2270,3 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
     </div>
   );
 }
-
-    

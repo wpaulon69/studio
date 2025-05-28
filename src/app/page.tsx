@@ -147,6 +147,9 @@ export default function Home() {
   // Consecutive days rules state
   const [maxConsecutiveWork, setMaxConsecutiveWork] = useState<number>(6);
   const [maxConsecutiveRest, setMaxConsecutiveRest] = useState<number>(2);
+  const [preferredConsecutiveWorkDays, setPreferredConsecutiveWorkDays] = useState<number>(4);
+  const [preferredConsecutiveRestDays, setPreferredConsecutiveRestDays] = useState<number>(2);
+
 
   // Operational Rules State
   const [requiredDdWeekends, setRequiredDdWeekends] = useState<number>(1);
@@ -579,9 +582,16 @@ export default function Home() {
         if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
             const dataLine = lines[consecutivityRulesStartIndex + 1];
             const values = dataLine.split(';');
-            if (values.length === 2) {
+            if (values.length >= 2) { // Allow for 2 or 4 values for backward/forward compatibility
                 setMaxConsecutiveWork(parseInt(values[0]) || 1);
                 setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                if (values.length === 4) {
+                    setPreferredConsecutiveWorkDays(parseInt(values[2]) || 1);
+                    setPreferredConsecutiveRestDays(parseInt(values[3]) || 1);
+                } else { // If old format, set preferred to max
+                    setPreferredConsecutiveWorkDays(parseInt(values[0]) || 1);
+                    setPreferredConsecutiveRestDays(parseInt(values[1]) || 1);
+                }
                 generalConfigsLoadedMessages.push("Reglas Consecutividad cargadas.");
             }
         }
@@ -686,7 +696,7 @@ export default function Home() {
         }
 
         const loadedEmployeesFromMainSchedule: Employee[] = [];
-        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled);
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled); // Temporarily pass empty employees
 
         let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
         if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length;
@@ -958,9 +968,16 @@ export default function Home() {
         if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
             const dataLine = lines[consecutivityRulesStartIndex + 1];
             const values = dataLine.split(';');
-            if (values.length === 2) {
+            if (values.length >= 2) { // Allow for 2 or 4 values
                 setMaxConsecutiveWork(parseInt(values[0]) || 1);
                 setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                if (values.length === 4) {
+                    setPreferredConsecutiveWorkDays(parseInt(values[2]) || 1);
+                    setPreferredConsecutiveRestDays(parseInt(values[3]) || 1);
+                } else { // If old format, set preferred to max
+                    setPreferredConsecutiveWorkDays(parseInt(values[0]) || 1);
+                    setPreferredConsecutiveRestDays(parseInt(values[1]) || 1);
+                }
                 consecutivityRulesLoaded = true;
             }
         }
@@ -1018,7 +1035,19 @@ export default function Home() {
         };
 
         calculateFinalTotals(newSchedule, currentEmployees, newAbsences, loadedIsNightShiftEnabled);
-        const newReport = validateSchedule(newSchedule, currentEmployees, newAbsences, newHolidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, loadedIsNightShiftEnabled);
+        const newReport = validateSchedule(
+            newSchedule, 
+            currentEmployees, 
+            newAbsences, 
+            newHolidays, 
+            currentTargetStaffing, 
+            maxConsecutiveWork, 
+            maxConsecutiveRest, 
+            currentOperationalRules, 
+            loadedIsNightShiftEnabled,
+            preferredConsecutiveWorkDays,
+            preferredConsecutiveRestDays
+        );
 
         setSchedule(newSchedule);
         setReport(newReport);
@@ -1122,7 +1151,9 @@ export default function Home() {
           maxConsecutiveWork,
           maxConsecutiveRest,
           currentOperationalRules,
-          isNightShiftEnabled
+          isNightShiftEnabled,
+          preferredConsecutiveWorkDays,
+          preferredConsecutiveRestDays
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -1176,7 +1207,19 @@ export default function Home() {
          setTimeout(() => {
              try {
                 calculateFinalTotals(scheduleToRecalculate, employees, absences, isNightShiftEnabled);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
+                const newReport = validateSchedule(
+                    scheduleToRecalculate, 
+                    employees, 
+                    absences, 
+                    holidays, 
+                    currentTargetStaffing, 
+                    maxConsecutiveWork, 
+                    maxConsecutiveRest, 
+                    currentOperationalRules, 
+                    isNightShiftEnabled,
+                    preferredConsecutiveWorkDays,
+                    preferredConsecutiveRestDays
+                );
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -1278,8 +1321,9 @@ export default function Home() {
     csvContent += `${targetMWorkday};${targetTWorkday};${targetNWorkday};${targetMWeekendHoliday};${targetTWeekendHoliday};${targetNWeekendHoliday}\r\n`;
 
     csvContent += "\r\n\r\n";
-    csvContent += `${CONFIG_CONSECUTIVITY_RULES_TOKEN};maxConsecutiveWork;maxConsecutiveRest\r\n`;
-    csvContent += `${maxConsecutiveWork};${maxConsecutiveRest}\r\n`;
+    csvContent += `${CONFIG_CONSECUTIVITY_RULES_TOKEN};maxConsecutiveWork;maxConsecutiveRest;preferredConsecutiveWork;preferredConsecutiveRest\r\n`;
+    csvContent += `${maxConsecutiveWork};${maxConsecutiveRest};${preferredConsecutiveWorkDays};${preferredConsecutiveRestDays}\r\n`;
+
 
     csvContent += "\r\n\r\n";
     csvContent += `${CONFIG_OPERATIONAL_RULES_TOKEN};requiredDdWeekends;minCoverageTPT;minCoverageM;minCoverageT;minCoverageN\r\n`;
@@ -1910,6 +1954,14 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                                             <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
                                             <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
                                         </div>
+                                        <div>
+                                            <Label htmlFor="preferredConsecutiveWorkDays">Días Trabajo Consecutivos Preferidos</Label>
+                                            <Input id="preferredConsecutiveWorkDays" type="number" value={preferredConsecutiveWorkDays} onChange={(e) => setPreferredConsecutiveWorkDays(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="preferredConsecutiveRestDays">Días Descanso Consecutivos Preferidos</Label>
+                                            <Input id="preferredConsecutiveRestDays" type="number" value={preferredConsecutiveRestDays} onChange={(e) => setPreferredConsecutiveRestDays(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -2034,25 +2086,25 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          {isNightShiftEnabled && (
                             <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                                 {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                             </TableRow>
                          )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>

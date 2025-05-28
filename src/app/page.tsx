@@ -247,7 +247,30 @@ export default function Home() {
         toast({ title: "Error de Validación", description: "El rango de la ausencia no se superpone con el mes y año seleccionados.", variant: "destructive" });
         return;
     }
-    setAbsences(prev => [...prev, { ...data, id: Date.now() }]);
+    const newAbsence = { ...data, id: Date.now() };
+    setAbsences(prev => [...prev, newAbsence]);
+
+    if (schedule && displayMode === 'viewing') {
+        const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
+        const startDateAbs = parseISO(newAbsence.startDate);
+        const endDateAbs = parseISO(newAbsence.endDate);
+
+        newSchedule.days.forEach(day => {
+            const currentDate = parseISO(day.date);
+            if (currentDate >= startDateAbs && currentDate <= endDateAbs) {
+                if (newSchedule.days.find(d => d.date === day.date)?.shifts[newAbsence.employeeId] !== undefined) {
+                    newSchedule.days.find(d => d.date === day.date)!.shifts[newAbsence.employeeId] = newAbsence.type;
+                }
+            }
+        });
+        setSchedule(newSchedule);
+        toast({
+            title: "Ausencia Aplicada al Horario Visible",
+            description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
+            variant: "default",
+        });
+    }
+
     setIsAbsenceDialogOpen(false);
     absenceForm.reset();
   };
@@ -274,7 +297,36 @@ export default function Home() {
         toast({ title: "Error de Validación", description: "El rango de la ausencia no se superpone con el mes y año seleccionados.", variant: "destructive" });
         return;
     }
-     setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? { ...a, ...data } : a));
+     const updatedAbsence = { ...editingAbsence, ...data };
+     setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? updatedAbsence : a));
+     
+     if (schedule && displayMode === 'viewing') {
+        const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
+        const startDateAbs = parseISO(updatedAbsence.startDate);
+        const endDateAbs = parseISO(updatedAbsence.endDate);
+
+        // First, potentially clear old absence days if range changed
+        // This part is tricky as we don't store "original" shift before absence
+        // For simplicity, we'll just apply the new one. User has to manually revert if needed.
+
+        newSchedule.days.forEach(day => {
+            const currentDate = parseISO(day.date);
+            // Clear previous markings IF the day is no longer in *any* absence for this employee
+            // This simple version just applies the new one.
+            if (currentDate >= startDateAbs && currentDate <= endDateAbs) {
+                 if (newSchedule.days.find(d => d.date === day.date)?.shifts[updatedAbsence.employeeId] !== undefined) {
+                    newSchedule.days.find(d => d.date === day.date)!.shifts[updatedAbsence.employeeId] = updatedAbsence.type;
+                }
+            }
+        });
+        setSchedule(newSchedule);
+        toast({
+            title: "Ausencia Actualizada en Horario Visible",
+            description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
+            variant: "default",
+        });
+    }
+
      setIsAbsenceDialogOpen(false);
      setEditingAbsence(null);
      absenceForm.reset();
@@ -282,6 +334,13 @@ export default function Home() {
 
   const handleDeleteAbsence = (id: number) => {
       setAbsences(prev => prev.filter(a => a.id !== id));
+      if (schedule && displayMode === 'viewing') {
+        toast({
+            title: "Ausencia Eliminada",
+            description: "La ausencia ha sido eliminada. Los turnos LAO/LM previamente marcados en el horario no se revierten automáticamente. Ajústalos manualmente si es necesario y recalcula.",
+            variant: "default",
+        });
+    }
   };
 
   const handleAddHoliday = (data: z.infer<typeof holidaySchema>) => {
@@ -554,11 +613,67 @@ export default function Home() {
             employeeConfigLoaded = true;
         }
 
+        let loadedHolidays: Holiday[] = [];
+        let holidaysLoadedFromCsv = false;
+        const holidaysStartIndex = lines.findIndex(line => line.startsWith(HOLIDAYS_HEADER_TOKEN));
+        if (holidaysStartIndex !== -1) {
+            for (let i = holidaysStartIndex + 1; i < lines.length; i++) {
+                const currentLine = lines[i];
+                if (!currentLine.trim() || currentLine.startsWith(ABSENCES_HEADER_TOKEN) || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
+                const [date, ...descriptionParts] = currentLine.split(';');
+                const description = descriptionParts.join(';').trim();
+                if (date && description) {
+                    loadedHolidays.push({ id: Date.now() + loadedHolidays.length, date: date.trim(), description: description });
+                }
+            }
+            holidaysLoadedFromCsv = loadedHolidays.length > 0;
+        }
+
+        let loadedAbsences: Absence[] = [];
+        let absencesLoadedFromCsv = false;
+        const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
+        if (absencesStartIndex !== -1) {
+            const absenceHeaderLine = lines[absencesStartIndex];
+            const absenceHeaderParts = absenceHeaderLine.split(';');
+            const absenceDataHeaders = absenceHeaderParts.slice(1);
+
+            const empNameIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'NombreEmpleado');
+            const typeIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'Tipo');
+            const startDateIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'FechaInicio');
+            const endDateIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'FechaFin');
+
+            for (let i = absencesStartIndex + 1; i < lines.length; i++) {
+                const currentLine = lines[i];
+                 if (!currentLine.trim() || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
+
+                const absenceCells = currentLine.split(';');
+                const csvEmpNameAbsence = (empNameIndexAbsence !== -1 && empNameIndexAbsence < absenceCells.length) ? absenceCells[empNameIndexAbsence]?.trim() : '';
+                const type = (typeIndexAbsence !== -1 && typeIndexAbsence < absenceCells.length) ? absenceCells[typeIndexAbsence]?.trim() : '';
+                const startDate = (startDateIndexAbsence !== -1 && startDateIndexAbsence < absenceCells.length) ? absenceCells[startDateIndexAbsence]?.trim() : '';
+                const endDate = (endDateIndexAbsence !== -1 && endDateIndexAbsence < absenceCells.length) ? absenceCells[endDateIndexAbsence]?.trim() : '';
+
+                const employeeForAbsence = loadedEmployees.find(e => e.name.toLowerCase() === csvEmpNameAbsence.toLowerCase());
+
+                if (employeeForAbsence && type && startDate && endDate) {
+                    loadedAbsences.push({
+                        id: Date.now() + loadedAbsences.length,
+                        employeeId: employeeForAbsence.id,
+                        type: type as "LAO" | "LM",
+                        startDate: startDate,
+                        endDate: endDate,
+                    });
+                } else {
+                    console.warn(`Ausencia no cargada desde CSV: Empleado ${csvEmpNameAbsence} no encontrado en la lista de empleados cargados, o datos de ausencia incompletos.`);
+                }
+            }
+            absencesLoadedFromCsv = loadedAbsences.length > 0;
+        }
+
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences([]); 
-        setHolidays([]); // Reset holidays for this specific import type
+        setAbsences(absencesLoadedFromCsv ? loadedAbsences : []); 
+        setHolidays(holidaysLoadedFromCsv ? loadedHolidays : []);
 
         // Load general configurations if present
         let generalConfigsLoadedMessages: string[] = [];
@@ -625,8 +740,10 @@ export default function Home() {
         if (loadedEmployees.length > 0) {
             const historyMsg = previousDatesForHistory.length > 0 ? ` Historial importado.` : "";
             const empConfigMsg = employeeConfigLoaded ? " Config. empleados cargada." : "";
+            const holidaysMsg = holidaysLoadedFromCsv ? ` ${loadedHolidays.length} feriado(s) cargado(s).` : "";
+            const absencesMsg = absencesLoadedFromCsv ? ` ${loadedAbsences.length} ausencia(s) cargada(s).` : "";
             const generalConfigMsg = generalConfigsLoadedMessages.length > 0 ? ` ${generalConfigsLoadedMessages.join(' ')}` : "";
-            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s).${historyMsg}${empConfigMsg}${generalConfigMsg}`;
+            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s).${historyMsg}${empConfigMsg}${holidaysMsg}${absencesMsg}${generalConfigMsg}`;
             toast({ title: "Importación Exitosa", description: toastMessage });
         } else if (employeesProcessedFromCsv > 0) {
              toastMessage = `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`;
@@ -2141,5 +2258,7 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
     </div>
   );
 }
+
+    
 
     

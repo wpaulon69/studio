@@ -250,7 +250,7 @@ export default function Home() {
     const newAbsence = { ...data, id: Date.now() };
     setAbsences(prev => [...prev, newAbsence]);
 
-    if (schedule && displayMode === 'viewing') {
+    if (schedule) { // No need to check displayMode, if schedule exists, apply it
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(newAbsence.startDate);
         const endDateAbs = parseISO(newAbsence.endDate);
@@ -263,7 +263,7 @@ export default function Home() {
                 }
             }
         });
-        setSchedule(newSchedule);
+        setSchedule(newSchedule); // Update schedule state
         toast({
             title: "Ausencia Aplicada al Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
@@ -300,26 +300,20 @@ export default function Home() {
      const updatedAbsence = { ...editingAbsence, ...data };
      setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? updatedAbsence : a));
      
-     if (schedule && displayMode === 'viewing') {
+     if (schedule) { // No need to check displayMode, if schedule exists, apply it
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(updatedAbsence.startDate);
         const endDateAbs = parseISO(updatedAbsence.endDate);
 
-        // First, potentially clear old absence days if range changed
-        // This part is tricky as we don't store "original" shift before absence
-        // For simplicity, we'll just apply the new one. User has to manually revert if needed.
-
         newSchedule.days.forEach(day => {
             const currentDate = parseISO(day.date);
-            // Clear previous markings IF the day is no longer in *any* absence for this employee
-            // This simple version just applies the new one.
             if (currentDate >= startDateAbs && currentDate <= endDateAbs) {
                  if (newSchedule.days.find(d => d.date === day.date)?.shifts[updatedAbsence.employeeId] !== undefined) {
                     newSchedule.days.find(d => d.date === day.date)!.shifts[updatedAbsence.employeeId] = updatedAbsence.type;
                 }
             }
         });
-        setSchedule(newSchedule);
+        setSchedule(newSchedule); // Update schedule state
         toast({
             title: "Ausencia Actualizada en Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
@@ -334,7 +328,7 @@ export default function Home() {
 
   const handleDeleteAbsence = (id: number) => {
       setAbsences(prev => prev.filter(a => a.id !== id));
-      if (schedule && displayMode === 'viewing') {
+      if (schedule) { // No need to check displayMode
         toast({
             title: "Ausencia Eliminada",
             description: "La ausencia ha sido eliminada. Los turnos LAO/LM previamente marcados en el horario no se revierten automáticamente. Ajústalos manualmente si es necesario y recalcula.",
@@ -873,7 +867,7 @@ export default function Home() {
             const turnoFijoIndex = configDataHeaders.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
             const asignFijasIndex = configDataHeaders.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
 
-            const employeesWithUpdatedConfig = currentEmployees.map(existingEmp => {
+            currentEmployees = currentEmployees.map(existingEmp => {
                 let employeeConfigDataRow: string | undefined;
                 for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
                     const currentLineContent = lines[i];
@@ -953,7 +947,6 @@ export default function Home() {
                 }
                 return existingEmp;
             });
-            currentEmployees = employeesWithUpdatedConfig;
             employeeConfigLoaded = true;
         }
 
@@ -1214,7 +1207,7 @@ export default function Home() {
         return;
     }
     setIsLoading(true);
-    setSchedule(null);
+    setSchedule(null); // Reset schedule before generation
     setReport([]);
 
 
@@ -1254,7 +1247,7 @@ export default function Home() {
         minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
     };
 
-    setDisplayMode('viewing');
+    // setDisplayMode('viewing'); // Moved to after successful generation
 
     setTimeout(() => {
       try {
@@ -1274,9 +1267,11 @@ export default function Home() {
         );
         setSchedule(result.schedule);
         setReport(result.report);
+        setDisplayMode('viewing'); // Move here to show schedule only after generation
       } catch (error) {
         console.error("Error generating schedule:", error);
         setReport([{rule: "Error de Generación", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`}]);
+        setDisplayMode('viewing'); // Still go to viewing mode to show the error
       } finally {
         setIsLoading(false);
       }
@@ -2141,7 +2136,13 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                              <CardDescription>Puedes editar los turnos manualmente. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
                         </div>
                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config'); setCurrentStep(1);}} disabled={isLoading}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
+                            <Button variant="outline" onClick={() => { 
+                                // No resetear schedule aquí para permitir volver a config y editar ausencias
+                                setDisplayMode('config'); 
+                                setCurrentStep(1);
+                            }} disabled={isLoading}>
+                                <ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración
+                            </Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
                              <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
                                 <Download className="mr-2 h-4 w-4" /> Exportar a CSV
@@ -2258,7 +2259,5 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
     </div>
   );
 }
-
-    
 
     

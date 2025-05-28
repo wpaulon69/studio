@@ -11,7 +11,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
 import { generateSchedule, calculateFinalTotals, validateSchedule, initializeSchedule as initializeScheduleLib } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
@@ -24,12 +23,21 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useToast } from "@/hooks/use-toast";
 
+// --- CSV Tokens ---
+const HISTORY_CSV_HEADER_TOKEN = "HISTORIAL_MES_ANTERIOR_EMPLEADO_V1";
+const EMPLOYEE_CONFIG_HEADER_TOKEN = "CONFIGURACION_EMPLEADOS_V1";
+const HOLIDAYS_HEADER_TOKEN = "FERIADOS_V1";
+const ABSENCES_HEADER_TOKEN = "AUSENCIAS_V1";
+const CONFIG_TARGET_STAFFING_TOKEN = "CONFIGURACION_DOTACION_OBJETIVO_V1";
+const CONFIG_CONSECUTIVITY_RULES_TOKEN = "CONFIGURACION_REGLAS_CONSECUTIVIDAD_V1";
+const CONFIG_OPERATIONAL_RULES_TOKEN = "CONFIGURACION_REGLAS_OPERATIVAS_V1";
+const CONFIG_NIGHT_SHIFT_TOKEN = "CONFIGURACION_TURNO_NOCHE_V1";
+
 // --- Initial Data (Now defaults, user can modify or import) ---
 const defaultInitialEmployees: Employee[] = [
     // This list can be initially empty or have some defaults,
     // but will be overwritten by CSV import if that feature is used.
 ];
-
 
 const defaultAbsences: Absence[] = [];
 const defaultHolidays: Holiday[] = [];
@@ -54,7 +62,7 @@ const employeePreferenceSchema = z.object({
     fixedAssignments: z.array(fixedAssignmentSchema).optional(),
     fixedWorkShift: z.object({
         dayOfWeek: z.array(z.number().min(0).max(6)),
-        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C'])) as [string, ...string[]])
+        shift: z.enum(Array.from(new Set([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N'])) as [string, ...string[]])
     }).optional()
 });
 
@@ -115,6 +123,7 @@ function isAbsenceRangeValid(startDateStr: string, endDateStr: string, currentYe
 // --- Component ---
 export default function Home() {
   const [displayMode, setDisplayMode] = useState<'config' | 'viewing'>('config');
+  const [currentStep, setCurrentStep] = useState<number>(1);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -123,11 +132,16 @@ export default function Home() {
   const [selectedYear, setSelectedYear] = useState<number | null>(null);
   const [isDateInitialized, setIsDateInitialized] = useState(false);
 
+  // Night Shift Toggle
+  const [isNightShiftEnabled, setIsNightShiftEnabled] = useState<boolean>(true);
+
   // Target Staffing State
   const [targetMWorkday, setTargetMWorkday] = useState<number>(3);
   const [targetTWorkday, setTargetTWorkday] = useState<number>(1);
+  const [targetNWorkday, setTargetNWorkday] = useState<number>(1);
   const [targetMWeekendHoliday, setTargetMWeekendHoliday] = useState<number>(2);
   const [targetTWeekendHoliday, setTargetTWeekendHoliday] = useState<number>(1);
+  const [targetNWeekendHoliday, setTargetNWeekendHoliday] = useState<number>(1);
   const { toast } = useToast();
 
   // Consecutive days rules state
@@ -139,6 +153,7 @@ export default function Home() {
   const [minCoverageTPT, setMinCoverageTPT] = useState<number>(2);
   const [minCoverageM, setMinCoverageM] = useState<number>(1);
   const [minCoverageT, setMinCoverageT] = useState<number>(1);
+  const [minCoverageN, setMinCoverageN] = useState<number>(1);
 
 
   useEffect(() => {
@@ -361,59 +376,73 @@ export default function Home() {
         if (employeeNameIndex === -1) {
           throw new Error("Columna 'Empleado' no encontrada en el encabezado del CSV.");
         }
-        const firstDayColumnIndex = 4; // Shifts start after "Empleado", "Total D", "Total M", "Total T"
 
-        const loadedEmployees: Employee[] = [];
+        let detectedCsvFirstShiftColIndex: number;
+        const totalTIndex = header.findIndex(h => h.trim().toLowerCase() === 'total t');
+        if (totalTIndex === -1) throw new Error("Columna 'Total T' no encontrada en CSV para detectar estructura.");
+
+        if ((totalTIndex + 1) < header.length && header[totalTIndex + 1].trim().toLowerCase() === 'total n') {
+            detectedCsvFirstShiftColIndex = totalTIndex + 2;
+        } else {
+            detectedCsvFirstShiftColIndex = totalTIndex + 1;
+        }
+
+
+        let loadedEmployees: Employee[] = [];
         const loadedHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
-        const previousDatesForHistory = getPreviousMonthDates(); // Relies on selectedMonth/Year
+        const previousDatesForHistory = getPreviousMonthDates();
 
         let employeesProcessedFromCsv = 0;
+        let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
+        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length;
 
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i];
-          const cells = line.split(',');
+
+        for (let i = 1; i < scheduleSectionEndIndex; i++) {
+          const lineContent = lines[i];
+          const cells = lineContent.split(',');
           const employeeNameFromCSV = cells[employeeNameIndex]?.trim();
 
           if (!employeeNameFromCSV ||
-              employeeNameFromCSV.toLowerCase().startsWith("total mañana") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total tarde") ||
-              employeeNameFromCSV.toLowerCase().startsWith("total personal")) {
-            break; // Stop processing at summary rows
+              employeeNameFromCSV.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) ||
+              employeeNameFromCSV.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())
+              ) {
+            scheduleSectionEndIndex = i;
+            break;
           }
 
           employeesProcessedFromCsv++;
 
-          let employeeInLoadedList = loadedEmployees.find(emp => emp.name.trim().toLowerCase() === employeeNameFromCSV.toLowerCase());
+          const newEmployee: Employee = {
+              id: Date.now() + loadedEmployees.length,
+              name: employeeNameFromCSV,
+              eligibleWeekend: true,
+              preferences: {},
+              history: {},
+          };
+          loadedEmployees.push(newEmployee);
 
-          if (!employeeInLoadedList) {
-            employeeInLoadedList = {
-                id: Date.now() + loadedEmployees.length, // Generate new ID
-                name: employeeNameFromCSV,
-                eligibleWeekend: true, // Default value
-                preferences: {},       // Default value
-                history: {},           // This will be populated by the history import logic
-            };
-            loadedEmployees.push(employeeInLoadedList);
-          }
 
-          // Populate history for this employee (newly created or found)
           if (previousDatesForHistory.length > 0) {
-            const dailyShiftsFromCSV = cells.slice(firstDayColumnIndex);
+            const dailyShiftsFromCSV = cells.slice(detectedCsvFirstShiftColIndex);
             const numHistoryDaysToTake = previousDatesForHistory.length;
-            // Take the *last* N shifts from the CSV for history
+
             const relevantShiftsFromCSV = dailyShiftsFromCSV.slice(-numHistoryDaysToTake);
 
             if (relevantShiftsFromCSV.length > 0) {
-                if (!loadedHistoryInputs[employeeInLoadedList.id]) {
-                    loadedHistoryInputs[employeeInLoadedList.id] = {};
+                if (!loadedHistoryInputs[newEmployee.id]) {
+                    loadedHistoryInputs[newEmployee.id] = {};
                 }
                 previousDatesForHistory.forEach((dateStr, index) => {
                     if (index < relevantShiftsFromCSV.length) {
                         const shiftValue = relevantShiftsFromCSV[index]?.trim();
-                        if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
-                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = shiftValue as ShiftType;
+                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                            loadedHistoryInputs[newEmployee.id][dateStr] = null;
+                        } else if (shiftValue && SHIFT_TYPES.includes(shiftValue as ShiftType)) {
+                            loadedHistoryInputs[newEmployee.id][dateStr] = shiftValue as ShiftType;
                         } else if (shiftValue === '' || shiftValue === '-') {
-                            loadedHistoryInputs[employeeInLoadedList.id][dateStr] = null;
+                            loadedHistoryInputs[newEmployee.id][dateStr] = null;
                         } else if (shiftValue) {
                             console.warn(`Turno inválido '${shiftValue}' para ${employeeNameFromCSV} en CSV. Se ignora para fecha ${dateStr}.`);
                         }
@@ -424,18 +453,177 @@ export default function Home() {
             }
           }
         }
+        
+        let employeeConfigLoaded = false;
+        const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
+        if (employeeConfigStartIndex !== -1) {
+            const configHeaderLine = lines[employeeConfigStartIndex];
+            const configHeaderParts = configHeaderLine.split(';');
+            const configDataHeaders = configHeaderParts.slice(1); 
+
+            const empNameIndexConfig = configDataHeaders.findIndex(h => h.trim() === 'Nombre');
+            const eligFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'ElegibleFindeDD');
+            const prefFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'PrefiereTrabajarFinde');
+            const turnoFijoIndex = configDataHeaders.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
+            const asignFijasIndex = configDataHeaders.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
+
+            const employeesWithUpdatedConfig = loadedEmployees.map(existingEmp => {
+                let employeeConfigDataRow: string | undefined;
+                for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
+                    const currentLineContent = lines[i];
+                     if (!currentLineContent.trim() ||
+                        currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) || 
+                        currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
+                       ) break;
+                    const dataCells = currentLineContent.split(';');
+                    const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
+                    if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
+                        employeeConfigDataRow = currentLineContent;
+                        break;
+                    }
+                }
+
+                if (employeeConfigDataRow) {
+                    const cells = employeeConfigDataRow.split(';');
+                    const updatedEmployee = {
+                        ...existingEmp,
+                        preferences: {
+                            ...(existingEmp.preferences || {}),
+                             fixedAssignments: [], 
+                        }
+                    };
+
+                    if (eligFindeIndex !== -1 && eligFindeIndex < cells.length && cells[eligFindeIndex]) {
+                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+                    }
+
+                    if (prefFindeIndex !== -1 && prefFindeIndex < cells.length && cells[prefFindeIndex]) {
+                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    } else {
+                        updatedEmployee.preferences.preferWeekendWork = false;
+                    }
+
+                    const jsonStringTurnoFijo = (turnoFijoIndex !== -1 && turnoFijoIndex < cells.length) ? cells[turnoFijoIndex]?.trim() : "";
+                    if (jsonStringTurnoFijo && jsonStringTurnoFijo.toLowerCase() !== 'null' && jsonStringTurnoFijo !== "") {
+                        try {
+                            const parsedFixedWorkShift = JSON.parse(jsonStringTurnoFijo);
+                            if (parsedFixedWorkShift && Array.isArray(parsedFixedWorkShift.dayOfWeek) && typeof parsedFixedWorkShift.shift === 'string') {
+                                updatedEmployee.preferences.fixedWorkShift = parsedFixedWorkShift;
+                            } else {
+                                 console.warn("Parsed TurnoFijoSemanal_JSON has invalid structure for", existingEmp.name, jsonStringTurnoFijo);
+                                 delete updatedEmployee.preferences.fixedWorkShift;
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, jsonStringTurnoFijo, e);
+                            delete updatedEmployee.preferences.fixedWorkShift;
+                        }
+                    } else {
+                        delete updatedEmployee.preferences.fixedWorkShift;
+                    }
+
+                    const jsonStringAsignaciones = (asignFijasIndex !== -1 && asignFijasIndex < cells.length) ? cells[asignFijasIndex]?.trim() : "";
+                     if (jsonStringAsignaciones && jsonStringAsignaciones.toLowerCase() !== 'null' && jsonStringAsignaciones !== "[]" && jsonStringAsignaciones !== "") {
+                        try {
+                            const parsedFixedAssignments = JSON.parse(jsonStringAsignaciones);
+                            if (Array.isArray(parsedFixedAssignments)) {
+                                updatedEmployee.preferences.fixedAssignments = parsedFixedAssignments;
+                            } else {
+                                console.warn("Parsed AsignacionesFijas_JSON is not an array for", existingEmp.name, jsonStringAsignaciones);
+                                updatedEmployee.preferences.fixedAssignments = [];
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, jsonStringAsignaciones, e);
+                            updatedEmployee.preferences.fixedAssignments = [];
+                        }
+                    } else {
+                         updatedEmployee.preferences.fixedAssignments = [];
+                    }
+                    return updatedEmployee;
+                }
+                return existingEmp;
+            });
+            loadedEmployees = employeesWithUpdatedConfig; 
+            employeeConfigLoaded = true;
+        }
+
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences([]); // Clear absences as employee list and IDs have changed
+        setAbsences([]); 
+        setHolidays([]); // Reset holidays for this specific import type
 
+        // Load general configurations if present
+        let generalConfigsLoadedMessages: string[] = [];
+
+        const targetStaffingStartIndex = lines.findIndex(line => line.startsWith(CONFIG_TARGET_STAFFING_TOKEN));
+        if (targetStaffingStartIndex !== -1 && (targetStaffingStartIndex + 1) < lines.length) {
+            const dataLine = lines[targetStaffingStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 6) {
+                setTargetMWorkday(parseInt(values[0]) || 0);
+                setTargetTWorkday(parseInt(values[1]) || 0);
+                setTargetNWorkday(parseInt(values[2]) || 0);
+                setTargetMWeekendHoliday(parseInt(values[3]) || 0);
+                setTargetTWeekendHoliday(parseInt(values[4]) || 0);
+                setTargetNWeekendHoliday(parseInt(values[5]) || 0);
+                generalConfigsLoadedMessages.push("Dotación Objetivo cargada.");
+            }
+        }
+
+        const consecutivityRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN));
+        if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[consecutivityRulesStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 2) {
+                setMaxConsecutiveWork(parseInt(values[0]) || 1);
+                setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                generalConfigsLoadedMessages.push("Reglas Consecutividad cargadas.");
+            }
+        }
+
+        const operationalRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN));
+        if (operationalRulesStartIndex !== -1 && (operationalRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[operationalRulesStartIndex + 1];
+            const values = dataLine.split(';');
+             if (values.length === 5) {
+                setRequiredDdWeekends(parseInt(values[0]) || 0);
+                setMinCoverageTPT(parseInt(values[1]) || 0);
+                setMinCoverageM(parseInt(values[2]) || 0);
+                setMinCoverageT(parseInt(values[3]) || 0);
+                setMinCoverageN(parseInt(values[4]) || 0);
+                generalConfigsLoadedMessages.push("Reglas Operativas cargadas.");
+            }
+        }
+        
+        const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
+        if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
+            const dataLine = lines[nightShiftConfigStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 1) {
+                setIsNightShiftEnabled(values[0].trim().toLowerCase() === 'true');
+                generalConfigsLoadedMessages.push("Config. Turno Noche cargada.");
+            }
+        }
+
+
+        let toastMessage = "";
         if (loadedEmployees.length > 0) {
-            const historyMessage = previousDatesForHistory.length > 0 ? `El historial de los últimos ${previousDatesForHistory.length} días también fue importado (si estaba disponible).` : "No se importó historial (mes/año no configurado para historial o CSV sin datos suficientes).";
-            toast({ title: "Importación Exitosa", description: `${loadedEmployees.length} empleado(s) cargado(s) desde el CSV. ${historyMessage}` });
+            const historyMsg = previousDatesForHistory.length > 0 ? ` Historial importado.` : "";
+            const empConfigMsg = employeeConfigLoaded ? " Config. empleados cargada." : "";
+            const generalConfigMsg = generalConfigsLoadedMessages.length > 0 ? ` ${generalConfigsLoadedMessages.join(' ')}` : "";
+            toastMessage = `${loadedEmployees.length} empleado(s) cargado(s).${historyMsg}${empConfigMsg}${generalConfigMsg}`;
+            toast({ title: "Importación Exitosa", description: toastMessage });
         } else if (employeesProcessedFromCsv > 0) {
-             toast({ title: "Importación Parcial", description: `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`, variant: "default" });
+             toastMessage = `Se procesaron ${employeesProcessedFromCsv} filas de empleados del CSV, pero no se cargaron nuevos empleados (posiblemente duplicados o formato incorrecto).`;
+             toast({ title: "Importación Parcial", description: toastMessage, variant: "default" });
         } else {
-            toast({ title: "Sin Empleados Cargados", description: "No se encontraron datos de empleados válidos en el archivo CSV para cargar.", variant: "default" });
+            toastMessage = "No se encontraron datos de empleados válidos en el archivo CSV para cargar.";
+            toast({ title: "Sin Empleados Cargados", description: toastMessage, variant: "default" });
         }
 
       } catch (error) {
@@ -480,68 +668,373 @@ export default function Home() {
         const employeeNameColIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'empleado');
         if (employeeNameColIndex === -1) throw new Error("Columna 'Empleado' no encontrada en el CSV.");
 
-        const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
-        const firstShiftColIndex = 4;
-        const csvDayHeaders = headerCells.slice(firstShiftColIndex, firstShiftColIndex + daysInSelectedMonth);
+        let detectedCsvFirstShiftColIndex: number;
+        const totalTIndex = headerCells.findIndex(h => h.trim().toLowerCase() === 'total t');
+        if (totalTIndex === -1) throw new Error("Columna 'Total T' no encontrada en el encabezado del CSV. Formato de archivo no reconocido.");
 
-        if (csvDayHeaders.length !== daysInSelectedMonth) {
-          throw new Error(`El número de días en el CSV (${csvDayHeaders.length}) no coincide con los días del mes seleccionado (${daysInSelectedMonth}).`);
+        if ((totalTIndex + 1) < headerCells.length && headerCells[totalTIndex + 1].trim().toLowerCase() === 'total n') {
+            detectedCsvFirstShiftColIndex = totalTIndex + 2;
+        } else {
+            detectedCsvFirstShiftColIndex = totalTIndex + 1;
         }
 
-        // Use existing employees list or load from CSV? For this function, we assume employees list is managed separately.
-        // The CSV provides shifts for employees *already in the system*.
-        // If an employee from CSV is not in the current 'employees' state, their schedule row is skipped.
-        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, employees, holidays);
-        let employeesMatched = 0;
-        let employeesNotFoundInApp: string[] = [];
+        const daysInSelectedMonth = getDaysInMonth(new Date(selectedYear, selectedMonth - 1));
+        const allPotentialDayHeadersInCsv = headerCells.slice(detectedCsvFirstShiftColIndex);
 
-        for (let i = 1; i < lines.length; i++) {
-          const cells = lines[i].split(',');
-          const csvEmployeeName = cells[employeeNameColIndex]?.trim();
-          if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith("total")) break;
+        if (allPotentialDayHeadersInCsv.length < daysInSelectedMonth) {
+            throw new Error(`El número de columnas de días en el CSV (${allPotentialDayHeadersInCsv.length}) es menor que los días del mes seleccionado (${daysInSelectedMonth}). Asegúrese que el mes y año seleccionado coincidan con el contenido del archivo CSV.`);
+        }
 
-          const appEmployee = employees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
-          if (appEmployee) {
-            employeesMatched++;
+        const loadedEmployeesFromMainSchedule: Employee[] = [];
+        const newSchedule = initializeScheduleLib(selectedYear, selectedMonth, [], holidays, isNightShiftEnabled);
+
+        let scheduleSectionEndIndex = lines.findIndex(line => line.toLowerCase().startsWith("total mañana"));
+        if (scheduleSectionEndIndex === -1) scheduleSectionEndIndex = lines.length;
+
+        for (let i = 1; i < scheduleSectionEndIndex; i++) {
+            const lineContent = lines[i];
+            const cells = lineContent.split(',');
+            const csvEmployeeName = cells[employeeNameColIndex]?.trim();
+            if (!csvEmployeeName || csvEmployeeName.toLowerCase().startsWith(HISTORY_CSV_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(HOLIDAYS_HEADER_TOKEN.toLowerCase()) || csvEmployeeName.toLowerCase().startsWith(ABSENCES_HEADER_TOKEN.toLowerCase())) {
+                 scheduleSectionEndIndex = i;
+                 break;
+            }
+
+
+            const newEmployee: Employee = {
+                id: Date.now() + loadedEmployeesFromMainSchedule.length,
+                name: csvEmployeeName,
+                eligibleWeekend: true,
+                preferences: {},
+                history: {}
+            };
+            loadedEmployeesFromMainSchedule.push(newEmployee);
+            newSchedule.employeeTotals[newEmployee.id] = { M: 0, T: 0, N: 0, D: 0, F: 0, LM: 0, LAO: 0, C: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
+
+
             for (let dayIdx = 0; dayIdx < daysInSelectedMonth; dayIdx++) {
-              const csvShift = cells[firstShiftColIndex + dayIdx]?.trim();
-              if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
-                newSchedule.days[dayIdx].shifts[appEmployee.id] = csvShift as ShiftType;
+              const csvShiftCellIndex = detectedCsvFirstShiftColIndex + dayIdx;
+              if (csvShiftCellIndex >= cells.length) {
+                  console.warn(`Fila de datos para empleado ${csvEmployeeName} es más corta de lo esperado. Faltan datos para el día ${dayIdx + 1}`);
+                  newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
+                  continue;
+              }
+              const csvShift = cells[csvShiftCellIndex]?.trim();
+
+              if (csvShift === 'N' && !isNightShiftEnabled) {
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
+              } else if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = csvShift as ShiftType;
               } else if (csvShift === '' || csvShift === '-') {
-                newSchedule.days[dayIdx].shifts[appEmployee.id] = null;
+                newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
               }
             }
-          } else {
-            if(!employeesNotFoundInApp.includes(csvEmployeeName)) employeesNotFoundInApp.push(csvEmployeeName);
-          }
+        }
+        let currentEmployees = [...loadedEmployeesFromMainSchedule];
+
+
+        let employeeConfigLoaded = false;
+        const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
+        if (employeeConfigStartIndex !== -1) {
+            const configHeaderLine = lines[employeeConfigStartIndex];
+            const configHeaderParts = configHeaderLine.split(';');
+            const configDataHeaders = configHeaderParts.slice(1);
+
+            const empNameIndexConfig = configDataHeaders.findIndex(h => h.trim() === 'Nombre');
+            const eligFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'ElegibleFindeDD');
+            const prefFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'PrefiereTrabajarFinde');
+            const turnoFijoIndex = configDataHeaders.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
+            const asignFijasIndex = configDataHeaders.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
+
+            const employeesWithUpdatedConfig = currentEmployees.map(existingEmp => {
+                let employeeConfigDataRow: string | undefined;
+                for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
+                    const currentLineContent = lines[i];
+                     if (!currentLineContent.trim() ||
+                        currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
+                        currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
+                       ) break;
+                    const dataCells = currentLineContent.split(';');
+                    const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
+                    if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
+                        employeeConfigDataRow = currentLineContent;
+                        break;
+                    }
+                }
+
+                if (employeeConfigDataRow) {
+                    const cells = employeeConfigDataRow.split(';');
+                    const updatedEmployee = {
+                        ...existingEmp,
+                        preferences: {
+                            ...(existingEmp.preferences || {}),
+                             fixedAssignments: [], 
+                        }
+                    };
+
+                    if (eligFindeIndex !== -1 && eligFindeIndex < cells.length && cells[eligFindeIndex]) {
+                        updatedEmployee.eligibleWeekend = cells[eligFindeIndex].trim().toLowerCase() === 'true';
+                    }
+
+                    if (prefFindeIndex !== -1 && prefFindeIndex < cells.length && cells[prefFindeIndex]) {
+                        updatedEmployee.preferences.preferWeekendWork = cells[prefFindeIndex].trim().toLowerCase() === 'true';
+                    } else {
+                        updatedEmployee.preferences.preferWeekendWork = false;
+                    }
+
+                    const jsonStringTurnoFijo = (turnoFijoIndex !== -1 && turnoFijoIndex < cells.length) ? cells[turnoFijoIndex]?.trim() : "";
+                    if (jsonStringTurnoFijo && jsonStringTurnoFijo.toLowerCase() !== 'null' && jsonStringTurnoFijo !== "") {
+                        try {
+                            const parsedFixedWorkShift = JSON.parse(jsonStringTurnoFijo);
+                            if (parsedFixedWorkShift && Array.isArray(parsedFixedWorkShift.dayOfWeek) && typeof parsedFixedWorkShift.shift === 'string') {
+                                updatedEmployee.preferences.fixedWorkShift = parsedFixedWorkShift;
+                            } else {
+                                 console.warn("Parsed TurnoFijoSemanal_JSON has invalid structure for", existingEmp.name, jsonStringTurnoFijo);
+                                 delete updatedEmployee.preferences.fixedWorkShift;
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing TurnoFijoSemanal_JSON for", existingEmp.name, jsonStringTurnoFijo, e);
+                            delete updatedEmployee.preferences.fixedWorkShift;
+                        }
+                    } else {
+                        delete updatedEmployee.preferences.fixedWorkShift;
+                    }
+
+                    const jsonStringAsignaciones = (asignFijasIndex !== -1 && asignFijasIndex < cells.length) ? cells[asignFijasIndex]?.trim() : "";
+                     if (jsonStringAsignaciones && jsonStringAsignaciones.toLowerCase() !== 'null' && jsonStringAsignaciones !== "[]" && jsonStringAsignaciones !== "") {
+                        try {
+                            const parsedFixedAssignments = JSON.parse(jsonStringAsignaciones);
+                            if (Array.isArray(parsedFixedAssignments)) {
+                                updatedEmployee.preferences.fixedAssignments = parsedFixedAssignments;
+                            } else {
+                                console.warn("Parsed AsignacionesFijas_JSON is not an array for", existingEmp.name, jsonStringAsignaciones);
+                                updatedEmployee.preferences.fixedAssignments = [];
+                            }
+                        } catch (e) {
+                            console.warn("Error parsing AsignacionesFijas_JSON for", existingEmp.name, jsonStringAsignaciones, e);
+                            updatedEmployee.preferences.fixedAssignments = [];
+                        }
+                    } else {
+                         updatedEmployee.preferences.fixedAssignments = [];
+                    }
+                    return updatedEmployee;
+                }
+                return existingEmp;
+            });
+            currentEmployees = employeesWithUpdatedConfig;
+            employeeConfigLoaded = true;
         }
 
-        if (employeesMatched === 0 && employees.length > 0) { // Only error if app has employees but none matched
-          throw new Error("No se encontraron empleados coincidentes entre el CSV y la lista actual de empleados. Asegúrese de que los nombres coincidan o importe la lista de empleados primero si es necesario.");
-        } else if (employeesMatched === 0 && employees.length === 0) {
-          throw new Error("No hay empleados en la aplicación. Importe una lista de empleados antes de cargar un horario completo.");
+
+
+        let historyLoaded = false;
+        const newHistoryInputs: { [employeeId: number]: { [date: string]: ShiftType | null } } = {};
+        const historySectionStartIndex = lines.findIndex(line => line.startsWith(HISTORY_CSV_HEADER_TOKEN));
+
+        if (historySectionStartIndex !== -1) {
+            const historyHeaderLine = lines[historySectionStartIndex];
+            const historyHeaderCells = historyHeaderLine.split(';');
+            const historyDateHeaders = historyHeaderCells.slice(1).map(h => h.trim());
+
+            for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
+                const historyLineContent = lines[i];
+                 if (!historyLineContent.trim() ||
+                    historyLineContent.toLowerCase().startsWith("total") ||
+                    historyLineContent.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) ||
+                    historyLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
+                    historyLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
+                    historyLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
+                    historyLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
+                    historyLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
+                    historyLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
+                    ) break;
+
+                const historyCells = historyLineContent.split(',');
+                const csvEmployeeName = historyCells[0]?.trim();
+                const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
+
+                if (employeeInApp) {
+                    if (!newHistoryInputs[employeeInApp.id]) {
+                        newHistoryInputs[employeeInApp.id] = {};
+                    }
+                    historyDateHeaders.forEach((dateStr, index) => {
+                        const shiftValue = historyCells[index + 1]?.trim();
+                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                             newHistoryInputs[employeeInApp.id][dateStr] = null;
+                        } else if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
+                            newHistoryInputs[employeeInApp.id][dateStr] = (shiftValue === '' || shiftValue === '-') ? null : shiftValue as ShiftType;
+                        }
+                    });
+                }
+            }
+            setHistoryInputs(newHistoryInputs);
+            historyLoaded = Object.keys(newHistoryInputs).length > 0;
         }
+
+
+        let holidaysLoaded = false;
+        const newHolidays: Holiday[] = [];
+        const holidaysStartIndex = lines.findIndex(line => line.startsWith(HOLIDAYS_HEADER_TOKEN));
+        if (holidaysStartIndex !== -1) {
+            for (let i = holidaysStartIndex + 1; i < lines.length; i++) {
+                const currentLine = lines[i];
+                if (!currentLine.trim() || currentLine.startsWith(ABSENCES_HEADER_TOKEN) || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
+                const [date, ...descriptionParts] = currentLine.split(';');
+                const description = descriptionParts.join(';').trim();
+                if (date && description) {
+                    newHolidays.push({ id: Date.now() + newHolidays.length, date: date.trim(), description: description });
+                }
+            }
+            setHolidays(newHolidays);
+            holidaysLoaded = newHolidays.length > 0;
+        }
+
+
+        let absencesLoaded = false;
+        const newAbsences: Absence[] = [];
+        const absencesStartIndex = lines.findIndex(line => line.startsWith(ABSENCES_HEADER_TOKEN));
+        if (absencesStartIndex !== -1) {
+            const absenceHeaderLine = lines[absencesStartIndex];
+            const absenceHeaderParts = absenceHeaderLine.split(';');
+            const absenceDataHeaders = absenceHeaderParts.slice(1);
+
+            const empNameIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'NombreEmpleado');
+            const typeIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'Tipo');
+            const startDateIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'FechaInicio');
+            const endDateIndexAbsence = absenceDataHeaders.findIndex(h => h.trim() === 'FechaFin');
+
+
+            for (let i = absencesStartIndex + 1; i < lines.length; i++) {
+                const currentLine = lines[i];
+                 if (!currentLine.trim() || currentLine.startsWith(HISTORY_CSV_HEADER_TOKEN) || currentLine.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) || currentLine.startsWith(HOLIDAYS_HEADER_TOKEN) || currentLine.startsWith(CONFIG_TARGET_STAFFING_TOKEN) || currentLine.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) || currentLine.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) || currentLine.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)) break;
+
+                const absenceCells = currentLine.split(';');
+                const csvEmpNameAbsence = (empNameIndexAbsence !== -1 && empNameIndexAbsence < absenceCells.length) ? absenceCells[empNameIndexAbsence]?.trim() : '';
+                const type = (typeIndexAbsence !== -1 && typeIndexAbsence < absenceCells.length) ? absenceCells[typeIndexAbsence]?.trim() : '';
+                const startDate = (startDateIndexAbsence !== -1 && startDateIndexAbsence < absenceCells.length) ? absenceCells[startDateIndexAbsence]?.trim() : '';
+                const endDate = (endDateIndexAbsence !== -1 && endDateIndexAbsence < absenceCells.length) ? absenceCells[endDateIndexAbsence]?.trim() : '';
+
+                const employeeForAbsence = currentEmployees.find(e => e.name.toLowerCase() === csvEmpNameAbsence.toLowerCase());
+
+                if (employeeForAbsence && type && startDate && endDate) {
+                    newAbsences.push({
+                        id: Date.now() + newAbsences.length,
+                        employeeId: employeeForAbsence.id,
+                        type: type as "LAO" | "LM",
+                        startDate: startDate,
+                        endDate: endDate,
+                    });
+                } else {
+                    console.warn(`Ausencia no cargada: Empleado ${csvEmpNameAbsence} no encontrado, o datos de ausencia incompletos.`);
+                }
+            }
+            setAbsences(newAbsences);
+            absencesLoaded = newAbsences.length > 0;
+        }
+
+        let targetStaffingLoaded = false;
+        const targetStaffingStartIndex = lines.findIndex(line => line.startsWith(CONFIG_TARGET_STAFFING_TOKEN));
+        if (targetStaffingStartIndex !== -1 && (targetStaffingStartIndex + 1) < lines.length) {
+            const dataLine = lines[targetStaffingStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 6) {
+                setTargetMWorkday(parseInt(values[0]) || 0);
+                setTargetTWorkday(parseInt(values[1]) || 0);
+                setTargetNWorkday(parseInt(values[2]) || 0);
+                setTargetMWeekendHoliday(parseInt(values[3]) || 0);
+                setTargetTWeekendHoliday(parseInt(values[4]) || 0);
+                setTargetNWeekendHoliday(parseInt(values[5]) || 0);
+                targetStaffingLoaded = true;
+            }
+        }
+
+        let consecutivityRulesLoaded = false;
+        const consecutivityRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN));
+        if (consecutivityRulesStartIndex !== -1 && (consecutivityRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[consecutivityRulesStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 2) {
+                setMaxConsecutiveWork(parseInt(values[0]) || 1);
+                setMaxConsecutiveRest(parseInt(values[1]) || 1);
+                consecutivityRulesLoaded = true;
+            }
+        }
+
+        let operationalRulesLoaded = false;
+        const operationalRulesStartIndex = lines.findIndex(line => line.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN));
+        if (operationalRulesStartIndex !== -1 && (operationalRulesStartIndex + 1) < lines.length) {
+            const dataLine = lines[operationalRulesStartIndex + 1];
+            const values = dataLine.split(';');
+             if (values.length === 5) {
+                setRequiredDdWeekends(parseInt(values[0]) || 0);
+                setMinCoverageTPT(parseInt(values[1]) || 0);
+                setMinCoverageM(parseInt(values[2]) || 0);
+                setMinCoverageT(parseInt(values[3]) || 0);
+                setMinCoverageN(parseInt(values[4]) || 0);
+                operationalRulesLoaded = true;
+            }
+        }
+
+        let nightShiftConfigLoaded = false;
+        let loadedIsNightShiftEnabled = isNightShiftEnabled;
+
+        const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
+        if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
+            const dataLine = lines[nightShiftConfigStartIndex + 1];
+            const values = dataLine.split(';');
+            if (values.length === 1) {
+                loadedIsNightShiftEnabled = values[0].trim().toLowerCase() === 'true';
+                setIsNightShiftEnabled(loadedIsNightShiftEnabled);
+                nightShiftConfigLoaded = true;
+            }
+        }
+
+
+        if (currentEmployees.length === 0) {
+          throw new Error("No se encontraron empleados válidos en la sección principal del horario del CSV.");
+        }
+        setEmployees(currentEmployees);
+
 
         const currentTargetStaffing: TargetStaffing = {
           workdayMorning: targetMWorkday,
           workdayAfternoon: targetTWorkday,
+          workdayNight: loadedIsNightShiftEnabled ? targetNWorkday : 0,
           weekendHolidayMorning: targetMWeekendHoliday,
           weekendHolidayAfternoon: targetTWeekendHoliday,
+          weekendHolidayNight: loadedIsNightShiftEnabled ? targetNWeekendHoliday : 0,
         };
         const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
+            minCoverageN: loadedIsNightShiftEnabled ? minCoverageN : 0,
         };
 
-        calculateFinalTotals(newSchedule, employees, absences);
-        const newReport = validateSchedule(newSchedule, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
+        calculateFinalTotals(newSchedule, currentEmployees, newAbsences, loadedIsNightShiftEnabled);
+        const newReport = validateSchedule(newSchedule, currentEmployees, newAbsences, newHolidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, loadedIsNightShiftEnabled);
 
         setSchedule(newSchedule);
         setReport(newReport);
         setDisplayMode('viewing');
-        toast({ title: "Horario Cargado", description: `Horario importado para ${employeesMatched} empleado(s). ${employeesNotFoundInApp.length > 0 ? `No se encontraron en la app: ${employeesNotFoundInApp.slice(0,3).join(', ')}${employeesNotFoundInApp.length > 3 ? '...' : ''}` : ''}` });
+        let toastMessages = [`Horario cargado para ${currentEmployees.length} empleado(s).`];
+        if (employeeConfigLoaded) toastMessages.push("Config. empleados cargada.");
+        if (historyLoaded) toastMessages.push("Historial cargado.");
+        if (holidaysLoaded) toastMessages.push(`${newHolidays.length} feriado(s) cargado(s).`);
+        if (absencesLoaded) toastMessages.push(`${newAbsences.length} ausencia(s) cargada(s).`);
+        if (targetStaffingLoaded) toastMessages.push("Dotación objetivo cargada.");
+        if (consecutivityRulesLoaded) toastMessages.push("Reglas consecutividad cargadas.");
+        if (operationalRulesLoaded) toastMessages.push("Reglas operativas cargadas.");
+        if (nightShiftConfigLoaded) toastMessages.push("Config. turno noche cargada.");
+
+        toast({ title: "Horario Cargado Completamente", description: toastMessages.join(' ') });
+
 
       } catch (error) {
         console.error("Error importando horario completo desde CSV:", error);
@@ -570,7 +1063,8 @@ export default function Home() {
     }
     if (employees.length === 0) {
         toast({ title: "Error de Configuración", description: "No hay empleados definidos. Por favor, agregue empleados o impórtelos desde un CSV.", variant: "destructive" });
-        setDisplayMode('config'); // Stay in config mode
+        setDisplayMode('config');
+        setCurrentStep(1);
         return;
     }
     setIsLoading(true);
@@ -601,14 +1095,17 @@ export default function Home() {
     const currentTargetStaffing: TargetStaffing = {
         workdayMorning: targetMWorkday,
         workdayAfternoon: targetTWorkday,
+        workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
         weekendHolidayMorning: targetMWeekendHoliday,
         weekendHolidayAfternoon: targetTWeekendHoliday,
+        weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
     };
     const currentOperationalRules: OperationalRules = {
         requiredDdWeekends: requiredDdWeekends,
         minCoverageTPT: minCoverageTPT,
         minCoverageM: minCoverageM,
         minCoverageT: minCoverageT,
+        minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
     };
 
     setDisplayMode('viewing');
@@ -624,7 +1121,8 @@ export default function Home() {
           currentTargetStaffing,
           maxConsecutiveWork,
           maxConsecutiveRest,
-          currentOperationalRules
+          currentOperationalRules,
+          isNightShiftEnabled
         );
         setSchedule(result.schedule);
         setReport(result.report);
@@ -662,20 +1160,23 @@ export default function Home() {
          const currentTargetStaffing: TargetStaffing = {
             workdayMorning: targetMWorkday,
             workdayAfternoon: targetTWorkday,
+            workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
             weekendHolidayMorning: targetMWeekendHoliday,
             weekendHolidayAfternoon: targetTWeekendHoliday,
+            weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
         };
          const currentOperationalRules: OperationalRules = {
             requiredDdWeekends: requiredDdWeekends,
             minCoverageTPT: minCoverageTPT,
             minCoverageM: minCoverageM,
             minCoverageT: minCoverageT,
+            minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
         };
 
          setTimeout(() => {
              try {
-                calculateFinalTotals(scheduleToRecalculate, employees, absences);
-                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules);
+                calculateFinalTotals(scheduleToRecalculate, employees, absences, isNightShiftEnabled);
+                const newReport = validateSchedule(scheduleToRecalculate, employees, absences, holidays, currentTargetStaffing, maxConsecutiveWork, maxConsecutiveRest, currentOperationalRules, isNightShiftEnabled);
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
             } catch (error) {
@@ -691,31 +1192,108 @@ export default function Home() {
     if (!schedule || !employees || selectedMonth === null || selectedYear === null) return;
 
     const monthName = MONTHS.find(m => m.value === selectedMonth)?.label.toUpperCase() || 'MesDesconocido';
-    const fileName = `horario_${monthName}_${selectedYear}.csv`;
+    const defaultFileName = `horario_${monthName}_${selectedYear}.csv`;
+
+    let userFileName = window.prompt("Ingrese el nombre para el archivo CSV:", defaultFileName);
+
+    if (userFileName === null) {
+        return;
+    }
+    if (userFileName.trim() === "") {
+        userFileName = defaultFileName;
+    }
+    if (!userFileName.toLowerCase().endsWith(".csv")) {
+        userFileName += ".csv";
+    }
 
     let csvContent = "data:text/csv;charset=utf-8,";
 
+
     const dayNumbers = schedule.days.map(day => format(parseISO(day.date), 'd'));
-    const headerRow = ["Empleado", "Total D", "Total M", "Total T", ...dayNumbers].join(",");
+    const headerBase = ["Empleado", "Total D", "Total M", "Total T"];
+    if (isNightShiftEnabled) headerBase.push("Total N");
+    const headerRow = [...headerBase, ...dayNumbers].join(",");
     csvContent += headerRow + "\r\n";
 
     employees.forEach(emp => {
-        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
-        const shifts = schedule.days.map(day => day.shifts[emp.id] || "").join(",");
-        const employeeRow = [emp.name, totals.D, totals.M, totals.T, shifts].join(",");
+        const totals = schedule.employeeTotals[emp.id] || { D: 0, M: 0, T: 0, N: 0, F: 0, C: 0, LAO: 0, LM: 0, workedDays: 0, freeSaturdays: 0, freeSundays: 0 };
+        const dailyShiftsArray = schedule.days.map(day => day.shifts[emp.id] || "");
+        const employeeRowBase = [emp.name, totals.D, totals.M, totals.T];
+        if(isNightShiftEnabled) employeeRowBase.push(totals.N);
+        const employeeRow = [...employeeRowBase, ...dailyShiftsArray].join(",");
         csvContent += employeeRow + "\r\n";
     });
-
     csvContent += "\r\n";
+    const totalPlaceholders = Array(headerBase.length - 1).fill("");
+    csvContent += ["Total Mañana (TM)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
+    csvContent += ["Total Tarde (TT)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
+    if (isNightShiftEnabled) {
+        csvContent += ["Total Noche (TN)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.N)].join(",") + "\r\n";
+    }
+    csvContent += ["TOTAL PERSONAL (TPT)", ...totalPlaceholders, ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
 
-    csvContent += ["Total Mañana (TM)", "", "", "", ...schedule.days.map(day => day.totals.M)].join(",") + "\r\n";
-    csvContent += ["Total Tarde (TT)", "", "", "", ...schedule.days.map(day => day.totals.T)].join(",") + "\r\n";
-    csvContent += ["TOTAL PERSONAL (TPT)", "", "", "", ...schedule.days.map(day => day.totals.TPT)].join(",") + "\r\n";
+
+    csvContent += "\r\n\r\n";
+    csvContent += `${EMPLOYEE_CONFIG_HEADER_TOKEN};Nombre;ElegibleFindeDD;PrefiereTrabajarFinde;TurnoFijoSemanal_JSON;AsignacionesFijas_JSON\r\n`;
+    employees.forEach(emp => {
+        const fixedWorkShiftJson = emp.preferences.fixedWorkShift ? JSON.stringify(emp.preferences.fixedWorkShift) : "null";
+        const fixedAssignmentsJson = emp.preferences.fixedAssignments && emp.preferences.fixedAssignments.length > 0 ? JSON.stringify(emp.preferences.fixedAssignments) : "[]";
+        csvContent += `${emp.name};${emp.eligibleWeekend};${emp.preferences.preferWeekendWork || false};${fixedWorkShiftJson};${fixedAssignmentsJson}\r\n`;
+    });
+
+
+    const previousDatesForHistory = getPreviousMonthDates();
+    if (previousDatesForHistory.length > 0 && Object.keys(historyInputs).length > 0) {
+        csvContent += "\r\n\r\n";
+        const historyHeaderCells = [HISTORY_CSV_HEADER_TOKEN, ...previousDatesForHistory.map(d => format(parseISO(d), 'yyyy-MM-dd'))];
+        csvContent += historyHeaderCells.join(";") + "\r\n";
+        employees.forEach(emp => {
+            const empHistory = historyInputs[emp.id] || {};
+            const historyRowValues = previousDatesForHistory.map(dateStr => empHistory[dateStr] || "");
+            csvContent += [emp.name, ...historyRowValues].join(",") + "\r\n";
+        });
+    }
+
+
+    if (holidays.length > 0) {
+        csvContent += "\r\n\r\n";
+        csvContent += `${HOLIDAYS_HEADER_TOKEN};Fecha;Descripcion\r\n`;
+        holidays.forEach(hol => {
+            csvContent += `${hol.date};${hol.description}\r\n`;
+        });
+    }
+
+
+    if (absences.length > 0) {
+        csvContent += "\r\n\r\n";
+        csvContent += `${ABSENCES_HEADER_TOKEN};NombreEmpleado;Tipo;FechaInicio;FechaFin\r\n`;
+        absences.forEach(abs => {
+            const empName = employees.find(e => e.id === abs.employeeId)?.name || `ID_EMPLEADO_DESCONOCIDO_${abs.employeeId}`;
+            csvContent += `${empName};${abs.type};${abs.startDate};${abs.endDate}\r\n`;
+        });
+    }
+
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_TARGET_STAFFING_TOKEN};targetMWorkday;targetTWorkday;targetNWorkday;targetMWeekendHoliday;targetTWeekendHoliday;targetNWeekendHoliday\r\n`;
+    csvContent += `${targetMWorkday};${targetTWorkday};${targetNWorkday};${targetMWeekendHoliday};${targetTWeekendHoliday};${targetNWeekendHoliday}\r\n`;
+
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_CONSECUTIVITY_RULES_TOKEN};maxConsecutiveWork;maxConsecutiveRest\r\n`;
+    csvContent += `${maxConsecutiveWork};${maxConsecutiveRest}\r\n`;
+
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_OPERATIONAL_RULES_TOKEN};requiredDdWeekends;minCoverageTPT;minCoverageM;minCoverageT;minCoverageN\r\n`;
+    csvContent += `${requiredDdWeekends};${minCoverageTPT};${minCoverageM};${minCoverageT};${minCoverageN}\r\n`;
+
+    csvContent += "\r\n\r\n";
+    csvContent += `${CONFIG_NIGHT_SHIFT_TOKEN};isNightShiftEnabled\r\n`;
+    csvContent += `${isNightShiftEnabled}\r\n`;
+
 
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", fileName);
+    link.setAttribute("download", userFileName);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -739,7 +1317,7 @@ export default function Home() {
   }, [schedule]);
 
   const getShiftCellClass = (shift: ShiftType | null): string => {
-    if (shift === null) return "bg-destructive text-destructive-foreground"; // Highlight empty slots
+    if (shift === null) return "bg-destructive text-destructive-foreground";
     return SHIFT_COLORS[shift] || "bg-background";
   };
 
@@ -748,12 +1326,48 @@ export default function Home() {
    }
 
    const getValidationIcon = (passed: boolean, rule: string) => {
-       if (passed) return <CheckCircle className="text-green-600 h-5 w-5" />;
-       if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial") || rule.startsWith("Generator Info") || rule.startsWith("Prioridad 2 Info")) {
-            return <Info className="text-yellow-600 h-5 w-5" />;
-       }
-       return <XCircle className="text-red-600 h-5 w-5" />;
-   };
+    // Fallos Críticos (P1, P2 Cobertura, P5 Consecutividad/Post-Noche, Completitud)
+    if (!passed && (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud"))) {
+        return <XCircle className="text-red-600 h-5 w-5" />;
+    }
+    // Advertencias (P3 Descansos, P4 Finde, Ranura Vacía Persistente, T->M, Compensatorio)
+    if (!passed && (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio"))) {
+        return <AlertTriangle className="text-yellow-500 h-5 w-5" />;
+    }
+    // Información (Flexibles no cumplidos, Preferencias, Info Generador)
+    if (!passed && (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial"))) {
+        return <Info className="text-blue-500 h-5 w-5" />;
+    }
+    // Éxito
+    if (passed) {
+        return <CheckCircle className="text-green-600 h-5 w-5" />;
+    }
+    // Por defecto (si algo no encaja, o reglas de solo info que siempre pasan)
+    return <Info className="text-gray-500 h-5 w-5" />;
+};
+
+const getAlertVariant = (passed: boolean, rule: string): "default" | "destructive" => {
+    if (!passed && (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima")|| rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud"))) {
+        return "destructive";
+    }
+    return "default";
+};
+
+const getAlertCustomClasses = (passed: boolean, rule: string): string => {
+    if (passed) return "bg-green-50 border-green-300";
+    if (!passed) {
+        if (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud")) {
+             return "bg-red-50 border-red-300"; // Destructive already handles some of this, but good for consistency
+        }
+        if (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio")) {
+            return "bg-yellow-50 border-yellow-300";
+        }
+        if (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial")) {
+            return "bg-blue-50 border-blue-300";
+        }
+    }
+    return "bg-gray-50 border-gray-300";
+};
 
     const daysOfWeekOptions = [
         { value: 1, label: 'Lunes' }, { value: 2, label: 'Martes' }, { value: 3, label: 'Miércoles' },
@@ -761,516 +1375,584 @@ export default function Home() {
         { value: 0, label: 'Domingo' }
     ];
 
-     const manualShiftOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
-     const weeklyFixedShiftOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C']));
+    const currentAllowedFixedShifts = useMemo(() => {
+        return isNightShiftEnabled ? ALLOWED_FIXED_ASSIGNMENT_SHIFTS : ALLOWED_FIXED_ASSIGNMENT_SHIFTS.filter(s => s !== 'N');
+    }, [isNightShiftEnabled]);
 
+    const currentWeeklyFixedShiftOptions = useMemo(() => {
+        const baseOptions = Array.from(new Set<ShiftType>([...ALLOWED_FIXED_ASSIGNMENT_SHIFTS, 'D', 'C', 'N']));
+        return isNightShiftEnabled ? baseOptions : baseOptions.filter(s => s !== 'N');
+    }, [isNightShiftEnabled]);
+
+     const manualShiftOptions = useMemo(() => {
+        const baseOptions = ['NULL', ...SHIFT_TYPES].map(opt => ({value: opt, label: opt === 'NULL' ? '-' : opt }));
+        return isNightShiftEnabled ? baseOptions : baseOptions.filter(opt => opt.value !== 'N');
+    }, [isNightShiftEnabled]);
+
+    const getStepTitle = () => {
+        switch (currentStep) {
+            case 1: return "Paso 1 de 3: Período y Personal";
+            case 2: return "Paso 2 de 3: Dotación Objetivo";
+            case 3: return "Paso 3 de 3: Reglas y Generación";
+            default: return "Ayuda horarios - Configuración";
+        }
+    };
 
   return (
     <div className="container mx-auto p-4 md:p-8">
        {displayMode === 'config' && (
             <Card className="mb-8 shadow-md">
                 <CardHeader>
-                <CardTitle className="text-2xl font-bold text-primary">Ayuda horarios - Configuración</CardTitle>
+                <CardTitle className="text-2xl font-bold text-primary">{getStepTitle()}</CardTitle>
                 <CardDescription>Configure los parámetros para la generación del horario o cargue uno existente.</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6">
-                    <div className="flex flex-col md:flex-row gap-4 items-end">
-                        <div className="flex gap-4 w-full md:w-auto">
-                            <div className="flex-1">
-                                <Label htmlFor="month-select">Mes</Label>
-                                <Select
-                                    value={selectedMonth?.toString() || ""}
-                                    onValueChange={(value) => setSelectedMonth(parseInt(value))}
-                                    disabled={!isDateInitialized}
-                                >
-                                    <SelectTrigger id="month-select">
-                                        <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {MONTHS.map(m => (
-                                            <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                    {currentStep === 1 && (
+                        <>
+                            <div className="flex flex-col md:flex-row gap-4 items-end justify-between">
+                                <div className="flex gap-4 w-full md:w-auto">
+                                    <div className="flex-1">
+                                        <Label htmlFor="month-select">Mes</Label>
+                                        <Select
+                                            value={selectedMonth?.toString() || ""}
+                                            onValueChange={(value) => setSelectedMonth(parseInt(value))}
+                                            disabled={!isDateInitialized}
+                                        >
+                                            <SelectTrigger id="month-select">
+                                                <SelectValue placeholder={isDateInitialized ? "Seleccionar mes" : "Cargando..."} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {MONTHS.map(m => (
+                                                    <SelectItem key={m.value} value={m.value.toString()}>{m.label}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                    <div className="flex-1">
+                                        <Label htmlFor="year-select">Año</Label>
+                                        <Select
+                                            value={selectedYear?.toString() || ""}
+                                            onValueChange={(value) => setSelectedYear(parseInt(value))}
+                                            disabled={!isDateInitialized}
+                                        >
+                                            <SelectTrigger id="year-select">
+                                            <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                            {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
+                                                <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
+                                            ))}
+                                            </SelectContent>
+                                        </Select>
+                                    </div>
+                                </div>
+                                <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                                     <Button
+                                        variant="outline"
+                                        onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
+                                        disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
+                                        className="flex-1"
+                                    >
+                                        <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV Completo
+                                    </Button>
+                                    <Input
+                                        type="file"
+                                        id="fullScheduleImportInput"
+                                        className="hidden"
+                                        accept=".csv"
+                                        onChange={handleLoadFullScheduleFromCSV}
+                                    />
+                                </div>
                             </div>
-                            <div className="flex-1">
-                                <Label htmlFor="year-select">Año</Label>
-                                <Select
-                                    value={selectedYear?.toString() || ""}
-                                    onValueChange={(value) => setSelectedYear(parseInt(value))}
-                                    disabled={!isDateInitialized}
-                                >
-                                    <SelectTrigger id="year-select">
-                                    <SelectValue placeholder={isDateInitialized ? "Seleccionar año" : "Cargando..."} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                    {[CURRENT_YEAR - 2, CURRENT_YEAR -1 , CURRENT_YEAR, CURRENT_YEAR + 1, CURRENT_YEAR + 2].map(y => (
-                                        <SelectItem key={y} value={y.toString()}>{y}</SelectItem>
-                                    ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                        </div>
-                        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-                            <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear} className="flex-1">
-                                {isLoading ? 'Generando...' : 'Generar Horario'}
-                            </Button>
-                            <Button
-                                variant="outline"
-                                onClick={() => document.getElementById('fullScheduleImportInput')?.click()}
-                                disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}
-                                className="flex-1"
-                            >
-                                <Upload className="mr-2 h-4 w-4" /> Cargar Horario CSV
-                            </Button>
-                            <Input
-                                type="file"
-                                id="fullScheduleImportInput"
-                                className="hidden"
-                                accept=".csv"
-                                onChange={handleLoadFullScheduleFromCSV}
-                            />
-                        </div>
-                    </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Empleados</CardTitle>
-                                <Dialog open={isEmployeeDialogOpen} onOpenChange={(isOpen) => {
-                                    setIsEmployeeDialogOpen(isOpen);
-                                    if (!isOpen) {
-                                        setEditingEmployee(null);
-                                        employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }});
-                                    }
-                                }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); setIsEmployeeDialogOpen(true);}}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
-                                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                                                <div>
-                                                    <Label htmlFor="name">Nombre</Label>
-                                                    <Input id="name" {...employeeForm.register("name")} />
-                                                    {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
-                                                </div>
-                                                <div className="flex items-center pt-6 space-x-2">
-                                                <Controller
-                                                        name="eligibleWeekend"
-                                                        control={employeeForm.control}
-                                                        render={({ field }) => (
-                                                            <Checkbox
-                                                                id="eligibleWeekend"
-                                                                checked={field.value}
-                                                                onCheckedChange={field.onChange}
-                                                            />
-                                                        )}
-                                                    />
-                                                    <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
-                                                </div>
-                                            </div>
-
-                                            <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
-                                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                                                <div className="flex items-center space-x-2">
-                                                    <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
-                                                    <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
-                                                </div>
-
-                                            </div>
-
-                                            <div className="space-y-2">
-                                                <Label>Asignaciones Fijas</Label>
-                                                {fixedAssignmentsFields.map((field, index) => (
-                                                    <div key={field.id} className="flex gap-2 items-center">
-                                                        <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Empleados</CardTitle>
+                                        <Dialog open={isEmployeeDialogOpen} onOpenChange={(isOpen) => {
+                                            setIsEmployeeDialogOpen(isOpen);
+                                            if (!isOpen) {
+                                                setEditingEmployee(null);
+                                                employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }});
+                                            }
+                                        }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingEmployee(null); employeeForm.reset({ name: '', eligibleWeekend: true, preferences: { fixedAssignments: [], preferWeekendWork: false, fixedWorkShift: undefined }}); setIsEmployeeDialogOpen(true);}}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="sm:max-w-[600px] max-h-[80vh] overflow-y-auto">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingEmployee ? 'Editar' : 'Añadir'} Empleado</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={employeeForm.handleSubmit(editingEmployee ? handleUpdateEmployee : handleAddEmployee)} className="space-y-4 p-1">
+                                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                                        <div>
+                                                            <Label htmlFor="name">Nombre</Label>
+                                                            <Input id="name" {...employeeForm.register("name")} />
+                                                            {employeeForm.formState.errors.name && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.name.message}</p>}
+                                                        </div>
+                                                        <div className="flex items-center pt-6 space-x-2">
                                                         <Controller
-                                                            name={`preferences.fixedAssignments.${index}.shift`}
+                                                                name="eligibleWeekend"
+                                                                control={employeeForm.control}
+                                                                render={({ field }) => (
+                                                                    <Checkbox
+                                                                        id="eligibleWeekend"
+                                                                        checked={field.value}
+                                                                        onCheckedChange={field.onChange}
+                                                                    />
+                                                                )}
+                                                            />
+                                                            <Label htmlFor="eligibleWeekend">¿Elegible Franco D/D?</Label>
+                                                        </div>
+                                                    </div>
+
+                                                    <h3 className="text-md font-semibold border-t pt-4">Preferencias (Opcional)</h3>
+                                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                                        <div className="flex items-center space-x-2">
+                                                            <Controller name="preferences.preferWeekendWork" control={employeeForm.control} render={({ field }) => (<Checkbox id="prefWeekendWork" checked={!!field.value} onCheckedChange={field.onChange} /> )}/>
+                                                            <Label htmlFor="prefWeekendWork">Prefiere Trabajar Finde</Label>
+                                                        </div>
+
+                                                    </div>
+
+                                                    <div className="space-y-2">
+                                                        <Label>Asignaciones Fijas</Label>
+                                                        {fixedAssignmentsFields.map((field, index) => (
+                                                            <div key={field.id} className="flex gap-2 items-center">
+                                                                <Input type="date" {...employeeForm.register(`preferences.fixedAssignments.${index}.date`)} placeholder="YYYY-MM-DD" className="flex-1"/>
+                                                                <Controller
+                                                                    name={`preferences.fixedAssignments.${index}.shift`}
+                                                                    control={employeeForm.control}
+                                                                    render={({ field }) => (
+                                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                            <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                                            <SelectContent>
+                                                                                {currentAllowedFixedShifts.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                            </SelectContent>
+                                                                        </Select>
+                                                                    )}
+                                                                />
+                                                                <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                            </div>
+                                                        ))}
+                                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
+                                                        {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
+
+                                                        <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
+                                                    </div>
+
+
+                                                    <div className="space-y-2 border-t pt-4">
+                                                        <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
+                                                        <Controller
+                                                            name="preferences.fixedWorkShift"
                                                             control={employeeForm.control}
                                                             render={({ field }) => (
-                                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                                    <SelectTrigger className="w-[100px]"> <SelectValue placeholder="Turno" /> </SelectTrigger>
+                                                            <div className="space-y-2">
+                                                                <Label className="text-xs">Días de la Semana</Label>
+                                                                <div className="grid grid-cols-3 gap-2">
+                                                                    {daysOfWeekOptions.map(day => (
+                                                                        <div key={day.value} className="flex items-center space-x-2">
+                                                                            <Checkbox
+                                                                                id={`fixedDay-${day.value}`}
+                                                                                checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
+                                                                                onCheckedChange={(checked) => {
+                                                                                    const currentDays = field.value?.dayOfWeek ?? [];
+                                                                                    const newDays = checked
+                                                                                        ? [...currentDays, day.value]
+                                                                                        : currentDays.filter(d => d !== day.value);
+                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); 
+                                                                                    field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
+                                                                                }}
+                                                                            />
+                                                                            <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
+                                                                        </div>
+                                                                    ))}
+                                                                </div>
+                                                                <Label className="text-xs">Turno Fijo</Label>
+                                                                <Select
+                                                                    value={field.value?.shift}
+                                                                    onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })}
+                                                                    disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0}
+                                                                >
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
                                                                     <SelectContent>
-                                                                        {ALLOWED_FIXED_ASSIGNMENT_SHIFTS.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                        {currentWeeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                                <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                                            </div>
+                                                            )}
+                                                        />
+                                                    </div>
+
+
+                                                    <DialogFooter>
+                                                        <DialogClose asChild>
+                                                            <Button type="button" variant="outline">Cancelar</Button>
+                                                        </DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                            {employees.map(emp => (
+                                                <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                    {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
+                                                    <div className="flex gap-1">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </li>
+                                            ))}
+                                            {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
+                                        </ul>
+                                        <div className="mt-4 space-y-4 border-t pt-4">
+                                            <h4 className="text-md font-semibold">Importar Empleados, Historial, Config. y Reglas</h4>
+                                            <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
+                                                <Upload className="mr-2 h-4 w-4" /> Importar Empleados, Historial, Config. y Reglas CSV
+                                            </Button>
+                                            <Input
+                                            type="file"
+                                            id="csvImportInput"
+                                            className="hidden"
+                                            accept=".csv"
+                                            onChange={handleImportHistoryFromCSV}
+                                            />
+                                            {employees.length > 0 && getPreviousMonthDates().length > 0 && (
+                                            <>
+                                            <p className="text-xs text-muted-foreground">Edite el historial importado si es necesario:</p>
+                                            {employees.map(emp => (
+                                                <div key={`hist-${emp.id}`} className="space-y-1">
+                                                    <p className="text-sm font-medium">{emp.name}</p>
+                                                    <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                                                        {getPreviousMonthDates().map(dateStr => (
+                                                            <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
+                                                                <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
+                                                                <Select
+                                                                    value={historyInputs[emp.id]?.[dateStr] || '-'}
+                                                                    onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
+                                                                >
+                                                                    <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
+                                                                        <SelectValue placeholder="-" />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="-">- (Vacío)</SelectItem>
+                                                                        {SHIFT_TYPES.filter(st => isNightShiftEnabled || st !== 'N').map(st => (
+                                                                            <SelectItem key={st} value={st}>{st}</SelectItem>
+                                                                        ))}
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            </>
+                                            )}
+                                            {employees.length > 0 && getPreviousMonthDates().length === 0 && (
+                                            <p className="text-xs text-muted-foreground">Seleccione mes/año principal para ver/editar historial del mes anterior.</p>
+                                            )}
+                                        </div>
+                                    </CardContent>
+                                </Card>
+
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
+                                        <Dialog open={isAbsenceDialogOpen} onOpenChange={(isOpen) => {
+                                            setIsAbsenceDialogOpen(isOpen);
+                                            if (!isOpen) {
+                                                setEditingAbsence(null);
+                                                absenceForm.reset();
+                                            }
+                                        }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }} disabled={employees.length === 0}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                        <DialogContent className="sm:max-w-[425px]">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
+                                                    <div>
+                                                        <Label htmlFor="employeeId">Empleado</Label>
+                                                        <Controller
+                                                            name="employeeId"
+                                                            control={absenceForm.control}
+                                                            render={({ field }) => (
+                                                                <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
+                                                                    <SelectContent>
+                                                                        {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
                                                                     </SelectContent>
                                                                 </Select>
                                                             )}
                                                         />
-                                                        <Button type="button" variant="ghost" size="icon" onClick={() => removeFixedAssignment(index)}><Trash2 className="h-4 w-4"/></Button>
+                                                        {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
                                                     </div>
-                                                ))}
-                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.root && <p className="text-red-500 text-xs mt-1">{employeeForm.formState.errors.preferences.fixedAssignments.root.message}</p>}
-                                                {employeeForm.formState.errors.preferences?.fixedAssignments?.map((err, idx)=> err && Object.values(err).map((fieldErr: any) => <p key={`${idx}-${fieldErr?.message}`} className="text-red-500 text-xs mt-1">{fieldErr?.message}</p> ) )}
-
-                                                <Button type="button" variant="outline" size="sm" onClick={() => appendFixedAssignment({ date: '', shift: 'M' })}>+ Asignación</Button>
-                                            </div>
-
-
-                                            <div className="space-y-2 border-t pt-4">
-                                                <Label>Turno Fijo Semanal (Ej: Alamo)</Label>
-                                                <Controller
-                                                    name="preferences.fixedWorkShift"
-                                                    control={employeeForm.control}
-                                                    render={({ field }) => (
-                                                    <div className="space-y-2">
-                                                        <Label className="text-xs">Días de la Semana</Label>
-                                                        <div className="grid grid-cols-3 gap-2">
-                                                            {daysOfWeekOptions.map(day => (
-                                                                <div key={day.value} className="flex items-center space-x-2">
-                                                                    <Checkbox
-                                                                        id={`fixedDay-${day.value}`}
-                                                                        checked={field.value?.dayOfWeek?.includes(day.value) ?? false}
-                                                                        onCheckedChange={(checked) => {
-                                                                            const currentDays = field.value?.dayOfWeek ?? [];
-                                                                            const newDays = checked
-                                                                                ? [...currentDays, day.value]
-                                                                                : currentDays.filter(d => d !== day.value);
-                                                                            const currentShift = field.value?.shift ?? 'M';
-                                                                            field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
-                                                                        }}
-                                                                    />
-                                                                    <Label htmlFor={`fixedDay-${day.value}`} className="text-sm">{day.label}</Label>
-                                                                </div>
-                                                            ))}
+                                                    <div>
+                                                        <Label htmlFor="type">Tipo</Label>
+                                                        <Controller
+                                                            name="type"
+                                                            control={absenceForm.control}
+                                                            render={({ field }) => (
+                                                                <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                                                    <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="LAO">LAO</SelectItem>
+                                                                        <SelectItem value="LM">LM</SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )} />
+                                                        {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="startDate">Fecha Inicio</Label>
+                                                        <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
+                                                        {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
+                                                    </div>
+                                                    <div>
+                                                        <Label htmlFor="endDate">Fecha Fin</Label>
+                                                        <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
+                                                        {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                        {absences.map(abs => {
+                                                const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
+                                                let formattedStart = 'Invalid Date';
+                                                let formattedEnd = 'Invalid Date';
+                                                try {
+                                                    formattedStart = format(parseISO(abs.startDate), 'dd/MM');
+                                                    formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
+                                                } catch (e) {
+                                                    console.error("Invalid date format in absence:", abs);
+                                                }
+                                                return (
+                                                    <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                        <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
+                                                        <div className="flex gap-1">
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
+                                                                <Edit className="h-4 w-4" />
+                                                            </Button>
+                                                            <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
+                                                                <Trash2 className="h-4 w-4" />
+                                                            </Button>
                                                         </div>
-                                                        <Label className="text-xs">Turno Fijo</Label>
-                                                        <Select
-                                                            value={field.value?.shift}
-                                                            onValueChange={(shift) => field.onChange({ ...field.value, dayOfWeek: field.value?.dayOfWeek ?? [], shift: shift as ShiftType })}
-                                                            disabled={!field.value?.dayOfWeek || field.value.dayOfWeek.length === 0}
-                                                        >
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Turno" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {weeklyFixedShiftOptions.map(st => <SelectItem key={st} value={st}>{st}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
-                                                        <Button type="button" variant="link" size="sm" onClick={() => field.onChange(undefined)}>Limpiar Turno Fijo</Button>
+                                                    </li>
+                                                );
+                                        })}
+                                            {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
+                                        </ul>
+                                    </CardContent>
+                                </Card>
+
+                                <Card>
+                                    <CardHeader className="flex flex-row items-center justify-between pb-2">
+                                        <CardTitle className="text-lg font-medium">Feriados</CardTitle>
+                                        <Dialog open={isHolidayDialogOpen} onOpenChange={(isOpen) => {
+                                                setIsHolidayDialogOpen(isOpen);
+                                                if (!isOpen) {
+                                                    setEditingHoliday(null);
+                                                    holidayForm.reset();
+                                                }
+                                            }}>
+                                            <DialogTrigger asChild>
+                                                <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); setIsHolidayDialogOpen(true); }}>
+                                                    <PlusCircle className="mr-2 h-4 w-4" /> Añadir
+                                                </Button>
+                                            </DialogTrigger>
+                                            <DialogContent className="sm:max-w-[425px]">
+                                                <DialogHeader>
+                                                    <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
+                                                </DialogHeader>
+                                                <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
+                                                    <div>
+                                                        <Label htmlFor="holidayDate">Fecha</Label>
+                                                        <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
+                                                        {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
                                                     </div>
-                                                    )}
-                                                />
-                                            </div>
-
-
-                                            <DialogFooter>
-                                                <DialogClose asChild>
-                                                    <Button type="button" variant="outline">Cancelar</Button>
-                                                </DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingEmployee ? 'Guardar Cambios' : 'Añadir Empleado'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                    {employees.map(emp => (
-                                        <li key={emp.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                            {emp.name} ({emp.eligibleWeekend ? 'Elegible Finde D/D' : 'No Elegible'})
-                                            <div className="flex gap-1">
-                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditEmployeeDialog(emp)}>
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteEmployee(emp.id)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </li>
-                                    ))}
-                                    {employees.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay empleados definidos. Importe desde CSV o añada manualmente.</p>}
-                                </ul>
-                                <div className="mt-4 space-y-4 border-t pt-4">
-                                    <h4 className="text-md font-semibold">Importar Lista de Empleados e Historial (Últimos 5 días Mes Anterior)</h4>
-                                     <Button type="button" variant="outline" size="sm" onClick={() => document.getElementById('csvImportInput')?.click()} className="mb-2 w-full">
-                                        <Upload className="mr-2 h-4 w-4" /> Importar Empleados e Historial CSV
-                                    </Button>
-                                    <Input
-                                      type="file"
-                                      id="csvImportInput"
-                                      className="hidden"
-                                      accept=".csv"
-                                      onChange={handleImportHistoryFromCSV}
-                                    />
-                                    {employees.length > 0 && getPreviousMonthDates().length > 0 && (
-                                      <>
-                                      <p className="text-xs text-muted-foreground">Edite el historial importado si es necesario:</p>
-                                      {employees.map(emp => (
-                                          <div key={`hist-${emp.id}`} className="space-y-1">
-                                              <p className="text-sm font-medium">{emp.name}</p>
-                                              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                                                  {getPreviousMonthDates().map(dateStr => (
-                                                      <div key={`${emp.id}-${dateStr}`} className="flex flex-col">
-                                                          <Label htmlFor={`hist-${emp.id}-${dateStr}`} className="text-xs mb-1">{format(parseISO(dateStr), 'dd/MM')}</Label>
-                                                          <Select
-                                                              value={historyInputs[emp.id]?.[dateStr] || '-'}
-                                                              onValueChange={(value) => handleHistoryChange(emp.id, dateStr, value)}
-                                                          >
-                                                              <SelectTrigger id={`hist-${emp.id}-${dateStr}`} className="h-8 text-xs">
-                                                                  <SelectValue placeholder="-" />
-                                                              </SelectTrigger>
-                                                              <SelectContent>
-                                                                  <SelectItem value="-">- (Vacío)</SelectItem>
-                                                                  {SHIFT_TYPES.map(st => (
-                                                                      <SelectItem key={st} value={st}>{st}</SelectItem>
-                                                                  ))}
-                                                              </SelectContent>
-                                                          </Select>
-                                                      </div>
-                                                  ))}
-                                              </div>
-                                          </div>
-                                      ))}
-                                      </>
-                                    )}
-                                    {employees.length > 0 && getPreviousMonthDates().length === 0 && (
-                                      <p className="text-xs text-muted-foreground">Seleccione mes/año principal para ver/editar historial del mes anterior.</p>
-                                    )}
-                                </div>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Ausencias (LAO/LM)</CardTitle>
-                                 <Dialog open={isAbsenceDialogOpen} onOpenChange={(isOpen) => {
-                                    setIsAbsenceDialogOpen(isOpen);
-                                    if (!isOpen) {
-                                        setEditingAbsence(null);
-                                        absenceForm.reset();
-                                    }
-                                }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingAbsence(null); absenceForm.reset(); setIsAbsenceDialogOpen(true); }} disabled={employees.length === 0}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                <DialogContent className="sm:max-w-[425px]">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingAbsence ? 'Editar' : 'Añadir'} Ausencia</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={absenceForm.handleSubmit(editingAbsence ? handleUpdateAbsence : handleAddAbsence)} className="space-y-4">
-                                            <div>
-                                                <Label htmlFor="employeeId">Empleado</Label>
-                                                <Controller
-                                                    name="employeeId"
-                                                    control={absenceForm.control}
-                                                    render={({ field }) => (
-                                                        <Select onValueChange={(value) => field.onChange(parseInt(value))} value={field.value?.toString()}>
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Empleado" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                {employees.map(emp => <SelectItem key={emp.id} value={emp.id.toString()}>{emp.name}</SelectItem>)}
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )}
-                                                />
-                                                {absenceForm.formState.errors.employeeId && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.employeeId.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="type">Tipo</Label>
-                                                <Controller
-                                                    name="type"
-                                                    control={absenceForm.control}
-                                                    render={({ field }) => (
-                                                        <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                                            <SelectTrigger><SelectValue placeholder="Seleccionar Tipo" /></SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="LAO">LAO</SelectItem>
-                                                                <SelectItem value="LM">LM</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    )} />
-                                                {absenceForm.formState.errors.type && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.type.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="startDate">Fecha Inicio</Label>
-                                                <Input id="startDate" type="date" {...absenceForm.register("startDate")} />
-                                                {absenceForm.formState.errors.startDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.startDate.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="endDate">Fecha Fin</Label>
-                                                <Input id="endDate" type="date" {...absenceForm.register("endDate")} />
-                                                {absenceForm.formState.errors.endDate && <p className="text-red-500 text-xs mt-1">{absenceForm.formState.errors.endDate.message}</p>}
-                                            </div>
-                                            <DialogFooter>
-                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingAbsence ? 'Guardar Cambios' : 'Añadir Ausencia'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                {absences.map(abs => {
-                                        const empName = employees.find(e => e.id === abs.employeeId)?.name || 'Desconocido';
-                                        let formattedStart = 'Invalid Date';
-                                        let formattedEnd = 'Invalid Date';
-                                        try {
-                                            formattedStart = format(parseISO(abs.startDate), 'dd/MM');
-                                            formattedEnd = format(parseISO(abs.endDate), 'dd/MM');
-                                        } catch (e) {
-                                            console.error("Invalid date format in absence:", abs);
-                                        }
-                                        return (
-                                            <li key={abs.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                                <span>{empName}: {abs.type} ({formattedStart} - {formattedEnd})</span>
-                                                <div className="flex gap-1">
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditAbsenceDialog(abs)}>
-                                                        <Edit className="h-4 w-4" />
-                                                    </Button>
-                                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteAbsence(abs.id!)}>
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            </li>
-                                        );
-                                })}
-                                    {absences.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay ausencias definidas.</p>}
-                                </ul>
-                            </CardContent>
-                        </Card>
-
-                        <Card>
-                            <CardHeader className="flex flex-row items-center justify-between pb-2">
-                                <CardTitle className="text-lg font-medium">Feriados</CardTitle>
-                                 <Dialog open={isHolidayDialogOpen} onOpenChange={(isOpen) => {
-                                        setIsHolidayDialogOpen(isOpen);
-                                        if (!isOpen) {
-                                            setEditingHoliday(null);
-                                            holidayForm.reset();
-                                        }
-                                    }}>
-                                    <DialogTrigger asChild>
-                                        <Button size="sm" variant="outline" onClick={() => { setEditingHoliday(null); holidayForm.reset(); setIsHolidayDialogOpen(true); }}>
-                                            <PlusCircle className="mr-2 h-4 w-4" /> Añadir
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="sm:max-w-[425px]">
-                                        <DialogHeader>
-                                            <DialogTitle>{editingHoliday ? 'Editar' : 'Añadir'} Feriado</DialogTitle>
-                                        </DialogHeader>
-                                        <form onSubmit={holidayForm.handleSubmit(editingHoliday ? handleUpdateHoliday : handleAddHoliday)} className="space-y-4">
-                                            <div>
-                                                <Label htmlFor="holidayDate">Fecha</Label>
-                                                <Input id="holidayDate" type="date" {...holidayForm.register("date")} />
-                                                {holidayForm.formState.errors.date && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.date.message}</p>}
-                                            </div>
-                                            <div>
-                                                <Label htmlFor="holidayDescription">Descripción</Label>
-                                                <Input id="holidayDescription" {...holidayForm.register("description")} />
-                                                {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
-                                            </div>
-                                            <DialogFooter>
-                                                <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
-                                                <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
-                                            </DialogFooter>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </CardHeader>
-                            <CardContent>
-                                <ul className="space-y-2">
-                                    {holidays.map(hol => {
-                                        let formattedDate = 'Invalid Date';
-                                        try {
-                                            formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
-                                        } catch (e) {
-                                            console.error("Invalid date format in holiday:", hol);
-                                        }
-                                        return (
-                                        <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
-                                            <span>{formattedDate}: {hol.description}</span>
-                                            <div className="flex gap-1">
-                                                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
-                                                    <Edit className="h-4 w-4" />
-                                                </Button>
-                                                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
-                                                    <Trash2 className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        </li>
-                                    )})}
-                                    {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
-                                </ul>
-                            </CardContent>
-                        </Card>
-                    </div>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div>
-                                    <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
-                                    <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
-                                    <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
-                                    <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
-                                    <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
+                                                    <div>
+                                                        <Label htmlFor="holidayDescription">Descripción</Label>
+                                                        <Input id="holidayDescription" {...holidayForm.register("description")} />
+                                                        {holidayForm.formState.errors.description && <p className="text-red-500 text-xs mt-1">{holidayForm.formState.errors.description.message}</p>}
+                                                    </div>
+                                                    <DialogFooter>
+                                                        <DialogClose asChild><Button type="button" variant="outline">Cancelar</Button></DialogClose>
+                                                        <Button type="submit"><Save className="mr-2 h-4 w-4" />{editingHoliday ? 'Guardar Cambios' : 'Añadir Feriado'}</Button>
+                                                    </DialogFooter>
+                                                </form>
+                                            </DialogContent>
+                                        </Dialog>
+                                    </CardHeader>
+                                    <CardContent>
+                                        <ul className="space-y-2">
+                                            {holidays.map(hol => {
+                                                let formattedDate = 'Invalid Date';
+                                                try {
+                                                    formattedDate = format(parseISO(hol.date), 'dd/MM/yyyy');
+                                                } catch (e) {
+                                                    console.error("Invalid date format in holiday:", hol);
+                                                }
+                                                return (
+                                                <li key={hol.id} className="flex justify-between items-center text-sm p-2 border rounded">
+                                                    <span>{formattedDate}: {hol.description}</span>
+                                                    <div className="flex gap-1">
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEditHolidayDialog(hol)}>
+                                                            <Edit className="h-4 w-4" />
+                                                        </Button>
+                                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => handleDeleteHoliday(hol.id!)}>
+                                                            <Trash2 className="h-4 w-4" />
+                                                        </Button>
+                                                    </div>
+                                                </li>
+                                            )})}
+                                            {holidays.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No hay feriados definidos.</p>}
+                                        </ul>
+                                    </CardContent>
+                                </Card>
                             </div>
-                        </CardContent>
-                    </Card>
-
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                <div>
-                                    <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
-                                    <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
-                                    <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
-                                </div>
+                             <div className="flex justify-end mt-6">
+                                <Button onClick={() => setCurrentStep(2)} disabled={isLoading}>Siguiente</Button>
                             </div>
-                        </CardContent>
-                    </Card>
+                        </>
+                    )}
 
-                    <Card>
-                        <CardHeader>
-                            <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
-                        </CardHeader>
-                        <CardContent className="space-y-4">
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                <div>
-                                    <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
-                                    <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                 <div>
-                                    <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
-                                    <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
-                                    <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
-                                <div>
-                                    <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT)</Label>
-                                    <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
-                                </div>
+                    {currentStep === 2 && (
+                        <>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Dotación Objetivo</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="mb-4 flex items-center space-x-2">
+                                        <Checkbox
+                                            id="enableNightShift"
+                                            checked={isNightShiftEnabled}
+                                            onCheckedChange={(checked) => setIsNightShiftEnabled(Boolean(checked))}
+                                        />
+                                        <Label htmlFor="enableNightShift" className="text-sm font-medium">
+                                            Habilitar Turno Noche (N)
+                                        </Label>
+                                    </div>
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <Label htmlFor="targetMWorkday">Mañanas (L-V)</Label>
+                                            <Input id="targetMWorkday" type="number" value={targetMWorkday} onChange={(e) => setTargetMWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="targetTWorkday">Tardes (L-V)</Label>
+                                            <Input id="targetTWorkday" type="number" value={targetTWorkday} onChange={(e) => setTargetTWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="targetNWorkday">Noches (L-V)</Label>
+                                                <Input id="targetNWorkday" type="number" value={targetNWorkday} onChange={(e) => setTargetNWorkday(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <Label htmlFor="targetMWeekendHoliday">Mañanas (S,D,Feriado)</Label>
+                                            <Input id="targetMWeekendHoliday" type="number" value={targetMWeekendHoliday} onChange={(e) => setTargetMWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="targetTWeekendHoliday">Tardes (S,D,Feriado)</Label>
+                                            <Input id="targetTWeekendHoliday" type="number" value={targetTWeekendHoliday} onChange={(e) => setTargetTWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="targetNWeekendHoliday">Noches (S,D,Feriado)</Label>
+                                                <Input id="targetNWeekendHoliday" type="number" value={targetNWeekendHoliday} onChange={(e) => setTargetNWeekendHoliday(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                             <div className="flex justify-between mt-6">
+                                <Button variant="outline" onClick={() => setCurrentStep(1)} disabled={isLoading}>Anterior</Button>
+                                <Button onClick={() => setCurrentStep(3)} disabled={isLoading}>Siguiente</Button>
                             </div>
-                        </CardContent>
-                    </Card>
+                        </>
+                    )}
 
+                    {currentStep === 3 && (
+                        <>
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Reglas de Consecutividad</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                        <div>
+                                            <Label htmlFor="maxConsecutiveWork">Máx. Días Trabajo Consecutivos</Label>
+                                            <Input id="maxConsecutiveWork" type="number" value={maxConsecutiveWork} onChange={(e) => setMaxConsecutiveWork(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="maxConsecutiveRest">Máx. Descansos (D/F/C) Consecutivos</Label>
+                                            <Input id="maxConsecutiveRest" type="number" value={maxConsecutiveRest} onChange={(e) => setMaxConsecutiveRest(parseInt(e.target.value) || 1)} min="1" />
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle className="text-lg font-medium">Reglas Operativas Adicionales</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                                        <div>
+                                            <Label htmlFor="requiredDdWeekends">Fines de Semana D/D (o C/C,F/F)</Label>
+                                            <Input id="requiredDdWeekends" type="number" value={requiredDdWeekends} onChange={(e) => setRequiredDdWeekends(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="minCoverageM">Mín. Personal Mañana (M)</Label>
+                                            <Input id="minCoverageM" type="number" value={minCoverageM} onChange={(e) => setMinCoverageM(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        <div>
+                                            <Label htmlFor="minCoverageT">Mín. Personal Tarde (T)</Label>
+                                            <Input id="minCoverageT" type="number" value={minCoverageT} onChange={(e) => setMinCoverageT(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                        {isNightShiftEnabled && (
+                                            <div>
+                                                <Label htmlFor="minCoverageN">Mín. Personal Noche (N)</Label>
+                                                <Input id="minCoverageN" type="number" value={minCoverageN} onChange={(e) => setMinCoverageN(parseInt(e.target.value) || 0)} min="0" />
+                                            </div>
+                                        )}
+                                        <div>
+                                            <Label htmlFor="minCoverageTPT">Mín. Personal Total (TPT = M+T)</Label>
+                                            <Input id="minCoverageTPT" type="number" value={minCoverageTPT} onChange={(e) => setMinCoverageTPT(parseInt(e.target.value) || 0)} min="0" />
+                                        </div>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                            <div className="flex justify-between mt-6">
+                                <Button variant="outline" onClick={() => setCurrentStep(2)} disabled={isLoading}>Anterior</Button>
+                                <Button onClick={handleGenerateSchedule} disabled={isLoading || !isDateInitialized || !selectedMonth || !selectedYear}>
+                                    {isLoading ? 'Generando...' : 'Generar Horario'}
+                                </Button>
+                            </div>
+                        </>
+                    )}
                 </CardContent>
             </Card>
         )}
@@ -1290,7 +1972,7 @@ export default function Home() {
                              <CardDescription>Puedes editar los turnos manualmente. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
                         </div>
                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config');}}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
+                            <Button variant="outline" onClick={() => { setSchedule(null); setReport([]); setDisplayMode('config'); setCurrentStep(1);}} disabled={isLoading}><ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración</Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
                              <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
                                 <Download className="mr-2 h-4 w-4" /> Exportar a CSV
@@ -1303,7 +1985,7 @@ export default function Home() {
                     <TableHeader>
                         <TableRow className="bg-secondary">
                         <TableHead className="sticky left-0 bg-secondary z-30 border p-1 text-center font-semibold min-w-[170px] w-[170px]">Empleado</TableHead>
-                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]")}>D</TableHead>
+                        <TableHead className={cn("sticky left-[170px] bg-secondary z-20 border p-1 text-center font-semibold min-w-[60px] w-[60px]", getTotalsCellClass())}>D</TableHead>
 
                         {getDayHeaders.map(({ dayOfMonth, dayOfWeek, isWeekend, isHoliday }, index) => (
                             <TableHead
@@ -1324,7 +2006,7 @@ export default function Home() {
                         {employees.map(emp => (
                         <TableRow key={emp.id}>
                             <TableCell className="sticky left-0 bg-background z-30 border p-1 font-medium text-sm whitespace-nowrap min-w-[170px] w-[170px]">{emp.name}</TableCell>
-                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]")}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-background z-20 border p-1 text-center text-xs font-medium min-w-[60px] w-[60px]", getTotalsCellClass())}>{schedule.employeeTotals[emp.id]?.D ?? 0}</TableCell>
 
                             {schedule.days.map(day => {
                             const currentShift = day.shifts[emp.id];
@@ -1352,18 +2034,25 @@ export default function Home() {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
+                         {isNightShiftEnabled && (
+                            <TableRow className={cn("font-semibold", getTotalsCellClass())}>
+                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
+                            </TableRow>
+                         )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
@@ -1381,7 +2070,7 @@ export default function Home() {
                 <CardContent>
                     <div className="space-y-3">
                     {report.map((item, index) => (
-                         <Alert key={index} variant={item.passed ? 'default' : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? 'default' : 'destructive')} className={cn(item.passed ? "border-green-200" : (item.rule.startsWith("Flexible") || item.rule.startsWith("Preferencia Flexible") || item.rule.startsWith("Info Generador") || item.rule.startsWith("Potencial") || item.rule.startsWith("Generator Info") || item.rule.startsWith("Prioridad 2 Info") ? "border-yellow-300" : "border-red-200") )}>
+                         <Alert key={index} variant={getAlertVariant(item.passed, item.rule)} className={cn(getAlertCustomClasses(item.passed, item.rule))}>
                             <div className="flex items-start space-x-3">
                             {getValidationIcon(item.passed, item.rule)}
                             <div>

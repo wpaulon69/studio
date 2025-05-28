@@ -15,11 +15,11 @@ export interface Employee {
   consecutiveWorkDays?: number; // Calculated based on history
 }
 
-export type ShiftType = "M" | "T" | "D" | "F" | "LM" | "LAO" | "C";
-export const SHIFT_TYPES: ShiftType[] = ["M", "T", "D", "F", "LM", "LAO", "C"];
+export type ShiftType = "M" | "T" | "N" | "D" | "F" | "LM" | "LAO" | "C";
+export const SHIFT_TYPES: ShiftType[] = ["M", "T", "N", "D", "F", "LM", "LAO", "C"];
 
 // Define the allowed shift types for fixed assignments, including 'D' and 'C'
-export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "D", "C"];
+export const ALLOWED_FIXED_ASSIGNMENT_SHIFTS: ShiftType[] = ["M", "T", "N", "D", "C"];
 
 
 export interface Absence {
@@ -46,12 +46,13 @@ export interface ScheduleDay {
   totals: {
     M: number;
     T: number;
+    N: number; // Added for Night shift
     D: number;
     F: number;
     LM: number;
     LAO: number;
     C: number;
-    TPT: number; // Total Personnel Turning (M+T)
+    TPT: number; // Total Personnel Turning (M+T), or M+T+N if desired later
   };
 }
 
@@ -59,6 +60,7 @@ export interface EmployeeTotals {
   workedDays: number;
   M: number;
   T: number;
+  N: number; // Added for Night shift
   freeSaturdays: number;
   freeSundays: number;
   F: number;
@@ -91,10 +93,11 @@ export interface ScheduleReport {
 export const SHIFT_COLORS: Record<ShiftType, string> = {
   M: "bg-green-100 text-green-800",
   T: "bg-blue-100 text-blue-800",
-  D: "bg-green-100 text-green-800", // Corrected: D is green
+  N: "bg-indigo-100 text-indigo-800",
+  D: "bg-green-100 text-green-800", // D shifts with green background
   F: "bg-purple-100 text-purple-800",
-  LM: "bg-amber-100 text-amber-800",  // Corrected: LM is amber/soft orange
-  LAO: "bg-amber-100 text-amber-800", // Corrected: LAO is amber/soft orange
+  LM: "bg-amber-100 text-amber-800",  // LM shifts with soft orange (amber) background
+  LAO: "bg-amber-100 text-amber-800", // LAO shifts with soft orange (amber) background
   C: "bg-teal-100 text-teal-800",
 };
 
@@ -103,8 +106,10 @@ export const TOTALS_COLOR = "bg-yellow-100 text-yellow-800";
 export interface TargetStaffing {
   workdayMorning: number;
   workdayAfternoon: number;
+  workdayNight: number;
   weekendHolidayMorning: number;
   weekendHolidayAfternoon: number;
+  weekendHolidayNight: number;
 }
 
 export interface OperationalRules {
@@ -112,4 +117,5 @@ export interface OperationalRules {
   minCoverageTPT: number;
   minCoverageM: number;
   minCoverageT: number;
+  minCoverageN: number;
 }

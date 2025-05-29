@@ -11,13 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { generateSchedule, calculateFinalTotals, validateSchedule, initializeScheduleLib } from '@/lib/schedule-generator';
+import { generateSchedule, calculateFinalTotals, validateSchedule, initializeScheduleLib, refineSchedule } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
 import { format, parseISO, getDay, getDaysInMonth, addDays, subDays, startOfMonth, endOfMonth, isValid, getYear as getFullYear, getMonth } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle, Info, PlusCircle, Trash2, Edit, Save, Settings, ArrowLeft, Download, Upload, Zap } from 'lucide-react';
 import { useForm, Controller, useFieldArray } from "react-hook-form";
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -250,7 +250,7 @@ export default function Home() {
     const newAbsence = { ...data, id: Date.now() };
     setAbsences(prev => [...prev, newAbsence]);
 
-    if (schedule) { 
+    if (schedule) {
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(newAbsence.startDate);
         const endDateAbs = parseISO(newAbsence.endDate);
@@ -263,7 +263,7 @@ export default function Home() {
                 }
             }
         });
-        setSchedule(newSchedule); 
+        setSchedule(newSchedule);
         toast({
             title: "Ausencia Aplicada al Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
@@ -300,8 +300,8 @@ export default function Home() {
     }
      const updatedAbsence = { ...editingAbsence, ...data };
      setAbsences(prev => prev.map(a => a.id === editingAbsence.id ? updatedAbsence : a));
-     
-     if (schedule) { 
+
+     if (schedule) {
         const newSchedule = JSON.parse(JSON.stringify(schedule)) as Schedule;
         const startDateAbs = parseISO(updatedAbsence.startDate);
         const endDateAbs = parseISO(updatedAbsence.endDate);
@@ -311,12 +311,8 @@ export default function Home() {
         newSchedule.days.forEach(day => {
             const currentDate = parseISO(day.date);
             // First, revert any old absence effect if it was this one
-            const oldAbsenceDay = schedule.days.find(d => d.date === day.date)?.shifts[employeeIdForAbsence] === editingAbsence.type;
-            if(oldAbsenceDay && (currentDate < parseISO(editingAbsence.startDate) || currentDate > parseISO(editingAbsence.endDate))){
-                 // This logic would be to revert to 'null' or a previous state,
-                 // For simplicity, we don't auto-revert to previous turn, user has to do it manually or regenerate if needed.
-                 // However, we need to make sure the new absence is applied correctly
-            }
+            // This logic might be complex if shifts were manually changed after absence was applied
+            // Simplification: just apply the new range. User might need to manually adjust if old range becomes free.
 
             if (currentDate >= startDateAbs && currentDate <= endDateAbs) {
                  if (newSchedule.days.find(d => d.date === day.date)?.shifts[employeeIdForAbsence] !== undefined) {
@@ -324,7 +320,7 @@ export default function Home() {
                 }
             }
         });
-        setSchedule(newSchedule); 
+        setSchedule(newSchedule);
         toast({
             title: "Ausencia Actualizada en Horario Visible",
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
@@ -340,7 +336,7 @@ export default function Home() {
 
   const handleDeleteAbsence = (id: number) => {
       setAbsences(prev => prev.filter(a => a.id !== id));
-      if (schedule) { 
+      if (schedule) {
         toast({
             title: "Ausencia Eliminada",
             description: "La ausencia ha sido eliminada. Los turnos LAO/LM previamente marcados en el horario no se revierten automáticamente. Ajústalos manualmente si es necesario y recalcula.",
@@ -521,13 +517,13 @@ export default function Home() {
             }
           }
         }
-        
+
         let employeeConfigLoaded = false;
         const employeeConfigStartIndex = lines.findIndex(line => line.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN));
         if (employeeConfigStartIndex !== -1) {
             const configHeaderLine = lines[employeeConfigStartIndex];
             const configHeaderParts = configHeaderLine.split(';');
-            const configDataHeaders = configHeaderParts.slice(1); 
+            const configDataHeaders = configHeaderParts.slice(1);
 
             const empNameIndexConfig = configDataHeaders.findIndex(h => h.trim() === 'Nombre');
             const eligFindeIndex = configDataHeaders.findIndex(h => h.trim() === 'ElegibleFindeDD');
@@ -535,14 +531,14 @@ export default function Home() {
             const turnoFijoIndex = configDataHeaders.findIndex(h => h.trim() === 'TurnoFijoSemanal_JSON');
             const asignFijasIndex = configDataHeaders.findIndex(h => h.trim() === 'AsignacionesFijas_JSON');
 
-            const employeesWithUpdatedConfig = loadedEmployees.map(existingEmp => {
+            loadedEmployees = loadedEmployees.map(existingEmp => {
                 let employeeConfigDataRow: string | undefined;
                 for (let i = employeeConfigStartIndex + 1; i < lines.length; i++) {
                     const currentLineContent = lines[i];
                      if (!currentLineContent.trim() ||
                         currentLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
                         currentLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
-                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) || 
+                        currentLineContent.startsWith(HISTORY_CSV_HEADER_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_TARGET_STAFFING_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_CONSECUTIVITY_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
@@ -562,7 +558,7 @@ export default function Home() {
                         ...existingEmp,
                         preferences: {
                             ...(existingEmp.preferences || {}),
-                             fixedAssignments: [], 
+                             fixedAssignments: [],
                         }
                     };
 
@@ -615,7 +611,6 @@ export default function Home() {
                 }
                 return existingEmp;
             });
-            loadedEmployees = employeesWithUpdatedConfig; 
             employeeConfigLoaded = true;
         }
 
@@ -678,7 +673,7 @@ export default function Home() {
 
         setEmployees(loadedEmployees);
         setHistoryInputs(loadedHistoryInputs);
-        setAbsences(absencesLoadedFromCsv ? loadedAbsences : []); 
+        setAbsences(absencesLoadedFromCsv ? loadedAbsences : []);
         setHolidays(holidaysLoadedFromCsv ? loadedHolidays : []);
 
         // Load general configurations if present
@@ -730,7 +725,7 @@ export default function Home() {
                 generalConfigsLoadedMessages.push("Reglas Operativas cargadas.");
             }
         }
-        
+
         const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
         if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
             const dataLine = lines[nightShiftConfigStartIndex + 1];
@@ -854,7 +849,7 @@ export default function Home() {
               }
               const csvShift = cells[csvShiftCellIndex]?.trim();
 
-              if (csvShift === 'N' && !isNightShiftEnabled) {
+              if (csvShift === 'N' && !isNightShiftEnabled) { // Use current UI state for night shift filter
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = null;
               } else if (csvShift && SHIFT_TYPES.includes(csvShift as ShiftType)) {
                 newSchedule.days[dayIdx].shifts[newEmployee.id] = csvShift as ShiftType;
@@ -892,7 +887,7 @@ export default function Home() {
                         currentLineContent.startsWith(CONFIG_OPERATIONAL_RULES_TOKEN) ||
                         currentLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                        ) break;
-                    const dataCells = currentLineContent.split(';'); // Corrected delimiter
+                    const dataCells = currentLineContent.split(';');
                     const csvConfigEmpName = (empNameIndexConfig !== -1 && empNameIndexConfig < dataCells.length) ? dataCells[empNameIndexConfig]?.trim() : '';
                     if (csvConfigEmpName.toLowerCase() === existingEmp.name.toLowerCase()) {
                         employeeConfigDataRow = currentLineContent;
@@ -901,12 +896,12 @@ export default function Home() {
                 }
 
                 if (employeeConfigDataRow) {
-                    const cells = employeeConfigDataRow.split(';'); // Corrected delimiter
+                    const cells = employeeConfigDataRow.split(';');
                     const updatedEmployee = {
                         ...existingEmp,
                         preferences: {
                             ...(existingEmp.preferences || {}),
-                             fixedAssignments: [], 
+                             fixedAssignments: [],
                         }
                     };
 
@@ -971,12 +966,12 @@ export default function Home() {
         if (historySectionStartIndex !== -1) {
             const historyHeaderLine = lines[historySectionStartIndex];
             const historyHeaderCells = historyHeaderLine.split(';');
-            const historyDateHeaders = historyHeaderCells.slice(1).map(h => h.trim());
+            const historyDateHeaders = historyHeaderCells.slice(1).map(h => h.trim()); // Dates start after the token
 
             for (let i = historySectionStartIndex + 1; i < lines.length; i++) {
                 const historyLineContent = lines[i];
                  if (!historyLineContent.trim() ||
-                    historyLineContent.toLowerCase().startsWith("total") ||
+                    historyLineContent.toLowerCase().startsWith("total") || // Catches "Total Mañana", etc.
                     historyLineContent.startsWith(EMPLOYEE_CONFIG_HEADER_TOKEN) ||
                     historyLineContent.startsWith(HOLIDAYS_HEADER_TOKEN) ||
                     historyLineContent.startsWith(ABSENCES_HEADER_TOKEN) ||
@@ -986,8 +981,8 @@ export default function Home() {
                     historyLineContent.startsWith(CONFIG_NIGHT_SHIFT_TOKEN)
                     ) break;
 
-                const historyCells = historyLineContent.split(',');
-                const csvEmployeeName = historyCells[0]?.trim();
+                const historyCells = historyLineContent.split(','); // History data is comma separated
+                const csvEmployeeName = historyCells[0]?.trim(); // Employee name is the first cell
                 const employeeInApp = currentEmployees.find(emp => emp.name.trim().toLowerCase() === csvEmployeeName.toLowerCase());
 
                 if (employeeInApp) {
@@ -995,8 +990,8 @@ export default function Home() {
                         newHistoryInputs[employeeInApp.id] = {};
                     }
                     historyDateHeaders.forEach((dateStr, index) => {
-                        const shiftValue = historyCells[index + 1]?.trim();
-                        if (shiftValue === 'N' && !isNightShiftEnabled) {
+                        const shiftValue = historyCells[index + 1]?.trim(); // Shifts start from second cell
+                        if (shiftValue === 'N' && !isNightShiftEnabled) { // Use current UI state for filtering N
                              newHistoryInputs[employeeInApp.id][dateStr] = null;
                         } else if (dateStr && (SHIFT_TYPES.includes(shiftValue as ShiftType) || shiftValue === '' || shiftValue === '-')) {
                             newHistoryInputs[employeeInApp.id][dateStr] = (shiftValue === '' || shiftValue === '-') ? null : shiftValue as ShiftType;
@@ -1120,7 +1115,7 @@ export default function Home() {
         }
 
         let nightShiftConfigLoaded = false;
-        let loadedIsNightShiftEnabled = isNightShiftEnabled;
+        let loadedIsNightShiftEnabled = isNightShiftEnabled; // Default to current UI state
 
         const nightShiftConfigStartIndex = lines.findIndex(line => line.startsWith(CONFIG_NIGHT_SHIFT_TOKEN));
         if (nightShiftConfigStartIndex !== -1 && (nightShiftConfigStartIndex + 1) < lines.length) {
@@ -1128,7 +1123,7 @@ export default function Home() {
             const values = dataLine.split(';');
             if (values.length === 1) {
                 loadedIsNightShiftEnabled = values[0].trim().toLowerCase() === 'true';
-                setIsNightShiftEnabled(loadedIsNightShiftEnabled);
+                setIsNightShiftEnabled(loadedIsNightShiftEnabled); // Update UI state
                 nightShiftConfigLoaded = true;
             }
         }
@@ -1158,14 +1153,14 @@ export default function Home() {
 
         calculateFinalTotals(newSchedule, currentEmployees, newAbsences, loadedIsNightShiftEnabled);
         const newReport = validateSchedule(
-            newSchedule, 
-            currentEmployees, 
-            newAbsences, 
-            newHolidays, 
-            currentTargetStaffing, 
-            maxConsecutiveWork, 
-            maxConsecutiveRest, 
-            currentOperationalRules, 
+            newSchedule,
+            currentEmployees,
+            newAbsences,
+            newHolidays,
+            currentTargetStaffing,
+            maxConsecutiveWork,
+            maxConsecutiveRest,
+            currentOperationalRules,
             loadedIsNightShiftEnabled,
             preferredConsecutiveWorkDays,
             preferredConsecutiveRestDays
@@ -1332,14 +1327,14 @@ export default function Home() {
              try {
                 calculateFinalTotals(scheduleToRecalculate, employees, absences, isNightShiftEnabled);
                 const newReport = validateSchedule(
-                    scheduleToRecalculate, 
-                    employees, 
-                    absences, 
-                    holidays, 
-                    currentTargetStaffing, 
-                    maxConsecutiveWork, 
-                    maxConsecutiveRest, 
-                    currentOperationalRules, 
+                    scheduleToRecalculate,
+                    employees,
+                    absences,
+                    holidays,
+                    currentTargetStaffing,
+                    maxConsecutiveWork,
+                    maxConsecutiveRest,
+                    currentOperationalRules,
                     isNightShiftEnabled,
                     preferredConsecutiveWorkDays,
                     preferredConsecutiveRestDays
@@ -1354,6 +1349,58 @@ export default function Home() {
             }
          }, 50)
     }
+
+  const handleRefineSchedule = () => {
+        if (!schedule || !employees || !selectedMonth || !selectedYear) {
+            toast({ title: "Error", description: "No hay horario cargado o datos incompletos para refinar.", variant: "destructive" });
+            return;
+        }
+        setIsLoading(true);
+        setReport([]);
+
+        const currentTargetStaffing: TargetStaffing = {
+            workdayMorning: targetMWorkday,
+            workdayAfternoon: targetTWorkday,
+            workdayNight: isNightShiftEnabled ? targetNWorkday : 0,
+            weekendHolidayMorning: targetMWeekendHoliday,
+            weekendHolidayAfternoon: targetTWeekendHoliday,
+            weekendHolidayNight: isNightShiftEnabled ? targetNWeekendHoliday : 0,
+        };
+        const currentOperationalRules: OperationalRules = {
+            requiredDdWeekends: requiredDdWeekends,
+            minCoverageTPT: minCoverageTPT,
+            minCoverageM: minCoverageM,
+            minCoverageT: minCoverageT,
+            minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
+        };
+
+        setTimeout(() => {
+            try {
+                const result = refineSchedule(
+                    JSON.parse(JSON.stringify(schedule)),
+                    JSON.parse(JSON.stringify(employees)),
+                    JSON.parse(JSON.stringify(absences)),
+                    JSON.parse(JSON.stringify(holidays)),
+                    currentTargetStaffing,
+                    maxConsecutiveWork,
+                    maxConsecutiveRest,
+                    currentOperationalRules,
+                    isNightShiftEnabled,
+                    preferredConsecutiveWorkDays,
+                    preferredConsecutiveRestDays
+                );
+                setSchedule(result.schedule);
+                setReport(result.report);
+                toast({ title: "Horario Refinado", description: "Se ha intentado mejorar la distribución de descansos. Revisa el resultado." });
+            } catch (error) {
+                console.error("Error refining schedule:", error);
+                setReport([{ rule: "Error de Refinamiento", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}` }]);
+            } finally {
+                setIsLoading(false);
+            }
+        }, 50);
+    };
+
 
   const exportScheduleToCSV = () => {
     if (!schedule || !employees || selectedMonth === null || selectedYear === null) return;
@@ -1494,23 +1541,18 @@ export default function Home() {
    }
 
    const getValidationIcon = (passed: boolean, rule: string) => {
-    // Fallos Críticos (P1, P2 Cobertura, P5 Consecutividad/Post-Noche, Completitud)
     if (!passed && (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud"))) {
         return <XCircle className="text-red-600 h-5 w-5" />;
     }
-    // Advertencias (P3 Descansos, P4 Finde, Ranura Vacía Persistente, T->M, Compensatorio)
     if (!passed && (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio"))) {
         return <AlertTriangle className="text-yellow-500 h-5 w-5" />;
     }
-    // Información (Flexibles no cumplidos, Preferencias, Info Generador)
     if (!passed && (rule.startsWith("Flexible") || rule.startsWith("Preferencia Flexible") || rule.startsWith("Info Generador") || rule.startsWith("Potencial"))) {
         return <Info className="text-blue-500 h-5 w-5" />;
     }
-    // Éxito
     if (passed) {
         return <CheckCircle className="text-green-600 h-5 w-5" />;
     }
-    // Por defecto (si algo no encaja, o reglas de solo info que siempre pasan)
     return <Info className="text-gray-500 h-5 w-5" />;
 };
 
@@ -1525,7 +1567,7 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
     if (passed) return "bg-green-50 border-green-300";
     if (!passed) {
         if (rule.startsWith("Prioridad 1") || rule.includes("Cobertura Mínima") || rule.includes("Cobertura TPT") || rule.includes("Ratio M-T") || rule.includes("Máx Días Consecutivos") || rule.includes("Descanso Post-Noche") || rule.includes("Completitud")) {
-             return "bg-red-50 border-red-300"; // Destructive already handles some of this, but good for consistency
+             return "bg-red-50 border-red-300";
         }
         if (rule.startsWith("Prioridad 3") || rule.startsWith("Prioridad 4") || rule.includes("Ranura Vacía Persistente") || rule.includes("Descanso T->M") || rule.includes("Descanso Compensatorio")) {
             return "bg-yellow-50 border-yellow-300";
@@ -1731,7 +1773,7 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                                                                                     const newDays = checked
                                                                                         ? [...currentDays, day.value]
                                                                                         : currentDays.filter(d => d !== day.value);
-                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M'); 
+                                                                                    const currentShift = field.value?.shift ?? (isNightShiftEnabled ? 'M' : 'M');
                                                                                     field.onChange({ dayOfWeek: newDays, shift: currentShift as ShiftType });
                                                                                 }}
                                                                             />
@@ -2148,13 +2190,16 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                              <CardDescription>Puedes editar los turnos manualmente. Usa "Recalcular" para actualizar totales y validaciones.</CardDescription>
                         </div>
                          <div className="flex flex-wrap gap-2">
-                            <Button variant="outline" onClick={() => { 
-                                setDisplayMode('config'); 
+                            <Button variant="outline" onClick={() => {
+                                setDisplayMode('config');
                                 setCurrentStep(1);
                             }} disabled={isLoading}>
                                 <ArrowLeft className="mr-2 h-4 w-4"/> Volver a Configuración
                             </Button>
                              <Button onClick={handleRecalculate} disabled={isLoading}>Recalcular Totales y Validar</Button>
+                             <Button onClick={handleRefineSchedule} disabled={isLoading} variant="outline">
+                                <Zap className="mr-2 h-4 w-4" /> Refinar Horario Actual
+                             </Button>
                              <Button onClick={exportScheduleToCSV} disabled={isLoading} variant="outline">
                                 <Download className="mr-2 h-4 w-4" /> Exportar a CSV
                              </Button>

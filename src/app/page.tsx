@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from "@/components/ui/dialog";
-import { generateSchedule, calculateFinalTotals, validateSchedule, initializeScheduleLib, refineSchedule } from '@/lib/schedule-generator';
+import { generateSchedule, calculateFinalTotals, validateSchedule, initializeScheduleLib, refineSchedule, calculateScheduleScore } from '@/lib/schedule-generator';
 import type { Schedule, ValidationResult, Employee, Absence, Holiday, ShiftType, TargetStaffing, OperationalRules } from '@/types';
 import { SHIFT_TYPES, SHIFT_COLORS, TOTALS_COLOR, ALLOWED_FIXED_ASSIGNMENT_SHIFTS } from '@/types';
 import { cn } from "@/lib/utils";
@@ -126,6 +126,7 @@ export default function Home() {
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [schedule, setSchedule] = useState<Schedule | null>(null);
   const [report, setReport] = useState<ValidationResult[]>([]);
+  const [scheduleScore, setScheduleScore] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(false);
 
   const [selectedMonth, setSelectedMonth] = useState<number | null>(null);
@@ -269,7 +270,7 @@ export default function Home() {
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
             variant: "default",
         });
-        if (schedule) setDisplayMode('viewing'); // Return to viewing mode if a schedule was active
+        if (schedule) setDisplayMode('viewing');
     }
 
     setIsAbsenceDialogOpen(false);
@@ -326,7 +327,7 @@ export default function Home() {
             description: "La ausencia se ha reflejado en el horario. Usa 'Recalcular Totales y Validar' para actualizar las métricas.",
             variant: "default",
         });
-        if (schedule) setDisplayMode('viewing'); // Return to viewing mode if a schedule was active
+        if (schedule) setDisplayMode('viewing');
     }
 
      setIsAbsenceDialogOpen(false);
@@ -1168,6 +1169,7 @@ export default function Home() {
 
         setSchedule(newSchedule);
         setReport(newReport);
+        setScheduleScore(calculateScheduleScore(newReport));
         setDisplayMode('viewing');
         let toastMessages = [`Horario cargado para ${currentEmployees.length} empleado(s).`];
         if (employeeConfigLoaded) toastMessages.push("Config. empleados cargada.");
@@ -1187,6 +1189,7 @@ export default function Home() {
         toast({ title: "Error de Importación", description: error instanceof Error ? error.message : "Ocurrió un error procesando el archivo CSV del horario.", variant: "destructive" });
         setSchedule(null);
         setReport([]);
+        setScheduleScore(null);
       } finally {
         setIsLoading(false);
       }
@@ -1216,6 +1219,7 @@ export default function Home() {
     setIsLoading(true);
     setSchedule(null); // Reset schedule before generation
     setReport([]);
+    setScheduleScore(null);
 
 
     const employeesWithHistory = employees.map(emp => ({
@@ -1254,8 +1258,6 @@ export default function Home() {
         minCoverageN: isNightShiftEnabled ? minCoverageN : 0,
     };
 
-    // setDisplayMode('viewing'); // Moved to after successful generation
-
     setTimeout(() => {
       try {
         const result = generateSchedule(
@@ -1274,11 +1276,13 @@ export default function Home() {
         );
         setSchedule(result.schedule);
         setReport(result.report);
-        setDisplayMode('viewing'); // Move here to show schedule only after generation
+        setScheduleScore(calculateScheduleScore(result.report));
+        setDisplayMode('viewing');
       } catch (error) {
         console.error("Error generating schedule:", error);
         setReport([{rule: "Error de Generación", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`}]);
-        setDisplayMode('viewing'); // Still go to viewing mode to show the error
+        setScheduleScore(0);
+        setDisplayMode('viewing');
       } finally {
         setIsLoading(false);
       }
@@ -1295,6 +1299,7 @@ export default function Home() {
             updatedSchedule.days[dayIndex].shifts[employeeId] = newShift;
             setSchedule(updatedSchedule);
             setReport([]);
+            setScheduleScore(null);
         }
     };
 
@@ -1306,6 +1311,7 @@ export default function Home() {
         }
         setIsLoading(true);
         setReport([]);
+        setScheduleScore(null);
          const scheduleToRecalculate = JSON.parse(JSON.stringify(schedule));
          const currentTargetStaffing: TargetStaffing = {
             workdayMorning: targetMWorkday,
@@ -1341,9 +1347,11 @@ export default function Home() {
                 );
                 setSchedule(scheduleToRecalculate);
                 setReport(newReport);
+                setScheduleScore(calculateScheduleScore(newReport));
             } catch (error) {
                 console.error("Error during recalculation:", error);
                 setReport([{rule: "Error de Recálculo", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}`}]);
+                setScheduleScore(0);
             } finally {
                  setIsLoading(false);
             }
@@ -1357,6 +1365,7 @@ export default function Home() {
         }
         setIsLoading(true);
         setReport([]);
+        setScheduleScore(null);
 
         const currentTargetStaffing: TargetStaffing = {
             workdayMorning: targetMWorkday,
@@ -1391,10 +1400,12 @@ export default function Home() {
                 );
                 setSchedule(result.schedule);
                 setReport(result.report);
+                setScheduleScore(calculateScheduleScore(result.report));
                 toast({ title: "Horario Refinado", description: "Se ha intentado mejorar la distribución de descansos. Revisa el resultado." });
             } catch (error) {
                 console.error("Error refining schedule:", error);
                 setReport([{ rule: "Error de Refinamiento", passed: false, details: `Error inesperado: ${error instanceof Error ? error.message : 'Error desconocido'}` }]);
+                setScheduleScore(0);
             } finally {
                 setIsLoading(false);
             }
@@ -2260,25 +2271,25 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
                         </TableRow>
                         ))}
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                        <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
-                        <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                        <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Mañana (TM)</TableCell>
+                        <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                         {schedule.days.map(day => <TableCell key={`TM-${day.date}`} className="border p-1 text-center text-xs">{day.totals.M}</TableCell>)}
                         </TableRow>
                         <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
-                            <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Tarde (TT)</TableCell>
+                            <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TT-${day.date}`} className="border p-1 text-center text-xs">{day.totals.T}</TableCell>)}
                         </TableRow>
                          {isNightShiftEnabled && (
                             <TableRow className={cn("font-semibold", getTotalsCellClass())}>
-                                <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
-                                <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                                <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>Total Noche (TN)</TableCell>
+                                <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                                 {schedule.days.map(day => <TableCell key={`TN-${day.date}`} className="border p-1 text-center text-xs">{day.totals.N}</TableCell>)}
                             </TableRow>
                          )}
                          <TableRow className={cn("font-bold", getTotalsCellClass())}>
-                            <TableCell className={cn("sticky left-0 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
-                             <TableCell className={cn("sticky left-[170px] z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
+                            <TableCell className={cn("sticky left-0 bg-yellow-100 text-yellow-800 z-30 border p-1 text-sm min-w-[170px] w-[170px]", getTotalsCellClass())}>TOTAL PERSONAL (TPT)</TableCell>
+                             <TableCell className={cn("sticky left-[170px] bg-yellow-100 text-yellow-800 z-20 border p-1 text-sm min-w-[60px] w-[60px]", getTotalsCellClass())}></TableCell>
                             {schedule.days.map(day => <TableCell key={`TPT-${day.date}`} className={cn("border p-1 text-center text-xs", (day.totals.TPT < minCoverageTPT || (!day.isHoliday && !day.isWeekend && day.totals.TPT > minCoverageTPT && day.totals.M <= day.totals.T)) && "bg-destructive text-destructive-foreground font-bold")}>{day.totals.TPT}</TableCell>)}
                         </TableRow>
                     </TableBody>
@@ -2290,7 +2301,7 @@ const getAlertCustomClasses = (passed: boolean, rule: string): string => {
              {report.length > 0 && !isLoading && (
                 <Card className="shadow-md">
                 <CardHeader>
-                    <CardTitle className="text-xl">Reporte de Validación</CardTitle>
+                    <CardTitle className="text-xl">Reporte de Validación {scheduleScore !== null ? `(Puntaje: ${scheduleScore})` : ''}</CardTitle>
                     <CardDescription>Resultados de la verificación de reglas obligatorias y flexibles.</CardDescription>
                 </CardHeader>
                 <CardContent>
